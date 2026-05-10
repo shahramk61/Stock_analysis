@@ -1,5 +1,5 @@
 import pandas as pd
-from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta
+from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength
 from dcf import calculate_dcf
 
 def calculate_pillars(data: dict, profile: str = "Balanced"):
@@ -12,18 +12,21 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     earnings = get_earnings_surprise(ticker)
     beta = get_rolling_beta(ticker)
     dcf_val = calculate_dcf(data)
+    piotroski = calculate_piotroski_f_score(ticker)
+    atr_vol = get_atr_volatility_clustering(ticker)
+    rs = get_relative_strength(ticker)
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
-    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2)))
+    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2) + (piotroski * 2)))
 
-    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100)))
+    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100) + (rs['rs_spy'] * 0.3) + (5 if atr_vol['vol_clustering'] == "Low" else -10)))
 
     valuation = min(95, max(30, 60 + (dcf_upside * 0.3)))
     
     sentiment = min(95, max(30, 65 + (earnings['avg_surprise_pct'] * 1.2)))
     
-    esg_quality = min(95, max(40, 70 + (10 if distress['risk_level'] == "Safe" else -15)))
+    esg_quality = min(95, max(40, 70 + (10 if distress['risk_level'] == "Safe" else -15) + (piotroski * 2)))
     
     weights = {
         "Balanced": {"fund":0.30, "tech":0.25, "val":0.25, "sent":0.10, "esg":0.10},
@@ -48,6 +51,9 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "distress": distress,
             "earnings": earnings,
             "beta": beta,
-            "dcf": dcf_val
+            "dcf": dcf_val,
+            "piotroski": piotroski,
+            "atr_vol": atr_vol,
+            "rs": rs
         }
     }

@@ -99,3 +99,85 @@ def get_rolling_beta(ticker: str, period="2y"):
         }
     except:
         return {"beta": 1.0, "alpha": 0.0, "r_squared": 0.0}
+
+def calculate_piotroski_f_score(ticker: str):
+    """New Signal: Piotroski F-Score (0-9) - Quality filter"""
+    stock = yf.Ticker(ticker)
+    try:
+        bs = stock.balance_sheet
+        inc = stock.income_stmt
+        cfs = stock.cashflow
+        if bs.empty or inc.empty:
+            return 5  # neutral
+        
+        # Profitability (max 4 points)
+        roa = inc.loc['Net Income'].iloc[0] / bs.loc['Total Assets'].iloc[0] if 'Net Income' in inc.index else 0
+        points = 1 if roa > 0 else 0
+        points += 1 if inc.loc['Net Income'].iloc[0] > inc.loc['Net Income'].iloc[1] else 0  # improving
+        
+        # Leverage & Liquidity (max 3 points)
+        points += 1 if bs.loc['Long Term Debt'].iloc[0] < bs.loc['Long Term Debt'].iloc[1] else 0
+        points += 1 if bs.loc['Current Ratio'].iloc[0] > 1 else 0
+        
+        # Efficiency (max 2 points)
+        points += 1 if inc.loc['Gross Profit'].iloc[0] / bs.loc['Total Assets'].iloc[0] > 0 else 0
+        points += 1 if cfs.loc['Operating Cash Flow'].iloc[0] > inc.loc['Net Income'].iloc[0] else 0
+        
+        return min(max(int(points), 0), 9)
+    except:
+        return 5
+
+def get_atr_volatility_clustering(ticker: str, period="1y"):
+    """New Signal: ATR-based risk + Volatility Clustering"""
+    stock = yf.Ticker(ticker)
+    hist = stock.history(period=period)
+    
+    # ATR (14-day)
+    high_low = hist['High'] - hist['Low']
+    high_close = np.abs(hist['High'] - hist['Close'].shift())
+    low_close = np.abs(hist['Low'] - hist['Close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean().iloc[-1]
+    
+    # Volatility clustering (current vol vs 1-year avg)
+    returns = hist['Close'].pct_change()
+    current_vol = returns.rolling(20).std().iloc[-1] * np.sqrt(252)
+    avg_vol = returns.std() * np.sqrt(252)
+    
+    clustering = "High" if current_vol > avg_vol * 1.2 else "Low"
+    
+    return {
+        "atr_percent": round((atr / hist['Close'].iloc[-1]) * 100, 2),
+        "current_vol": round(current_vol * 100, 1),
+        "vol_clustering": clustering,
+        "risk_level": "Elevated" if clustering == "High" else "Normal"
+    }
+
+def get_relative_strength(ticker: str, period="2y"):
+    """New Signal: Relative Strength vs SPY and Sector"""
+    stock = yf.Ticker(ticker)
+    spy = yf.Ticker("SPY")
+    
+    # Get sector ETF (approximate)
+    sector_map = {"AAPL": "XLK", "TSLA": "XLY", "NVDA": "SMH"}  # expand as needed
+    sector_etf = yf.Ticker(sector_map.get(ticker.upper(), "SPY"))
+    
+    try:
+        data = pd.DataFrame({
+            ticker: stock.history(period=period)['Close'].pct_change(),
+            'SPY': spy.history(period=period)['Close'].pct_change(),
+            'Sector': sector_etf.history(period=period)['Close'].pct_change()
+        }).dropna()
+        
+        # Correlation & relative performance
+        rs_spy = (data[ticker].iloc[-1] / data['SPY'].iloc[-1]) * 100 - 100
+        rs_sector = (data[ticker].iloc[-1] / data['Sector'].iloc[-1]) * 100 - 100
+        
+        return {
+            "rs_spy": round(float(rs_spy), 1),
+            "rs_sector": round(float(rs_sector), 1),
+            "outperforming_spy": rs_spy > 0,
+            "outperforming_sector": rs_sector > 0
+        }
+    except:
+        return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}

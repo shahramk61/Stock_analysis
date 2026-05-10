@@ -21,6 +21,9 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• DCF Upside       : {signals['dcf'].get('upside', 0):+.1f}%")
     print(f"• Earnings Surprise: {signals['earnings']['avg_surprise_pct']:+.1f}%")
     print(f"• Beta (vs SPY)    : {signals['beta']['beta']} (Alpha: {signals['beta']['alpha']})")
+    print(f"• Piotroski F-Score: {signals['piotroski']}/9")
+    print(f"• ATR Vol Cluster  : {signals['atr_vol']['atr_percent']}% ({signals['atr_vol']['vol_clustering']})")
+    print(f"• Rel Strength SPY : {signals['rs']['rs_spy']:+.1f}% (Sector: {signals['rs']['rs_sector']:+.1f}%)")
     
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")
