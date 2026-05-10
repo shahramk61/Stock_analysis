@@ -1,5 +1,5 @@
 import pandas as pd
-from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength
+from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength, get_market_regime, get_garch_forecast
 from dcf import calculate_dcf
 
 def calculate_pillars(data: dict, profile: str = "Balanced"):
@@ -15,12 +15,18 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     piotroski = calculate_piotroski_f_score(ticker)
     atr_vol = get_atr_volatility_clustering(ticker)
     rs = get_relative_strength(ticker)
+    regime = get_market_regime(ticker)
+    garch = get_garch_forecast(ticker)
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
+    # Regime and vol adjustments
+    regime_bonus = 8 if regime['regime'] == "Bull" else -8 if regime['regime'] == "Bear" else 0
+    vol_penalty = -6 if garch['vol_ratio'] > 1.4 else 0
+
     fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2) + (piotroski * 2)))
 
-    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100) + (rs['rs_spy'] * 0.3) + (5 if atr_vol['vol_clustering'] == "Low" else -10)))
+    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100) + (rs['rs_spy'] * 0.3) + (5 if atr_vol['vol_clustering'] == "Low" else -10) + regime_bonus + vol_penalty))
 
     valuation = min(95, max(30, 60 + (dcf_upside * 0.3)))
     
@@ -54,6 +60,8 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "dcf": dcf_val,
             "piotroski": piotroski,
             "atr_vol": atr_vol,
-            "rs": rs
+            "rs": rs,
+            "regime": regime,
+            "garch": garch
         }
     }

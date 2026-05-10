@@ -185,3 +185,60 @@ def get_relative_strength(ticker: str, period="2y"):
         }
     except:
         return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}
+
+def get_market_regime(ticker: str, period: str = "3y", n_states: int = 3):
+    """Hidden Markov Model (HMM) for market regime detection.
+    Detects Bull/Neutral/Bear regimes based on returns.
+    High impact for adaptive trading and risk management."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        if len(hist) < 100:
+            return {"regime": "Neutral", "probs": [0.33, 0.34, 0.33], "means": [0.0, 0.0, 0.0]}
+        returns = hist['Close'].pct_change().dropna().values.reshape(-1, 1)
+        from hmmlearn.hmm import GaussianHMM
+        model = GaussianHMM(n_components=n_states, covariance_type="full", n_iter=200, random_state=42, tol=1e-4)
+        model.fit(returns)
+        states = model.predict(returns)
+        current_state = states[-1]
+        probs = model.predict_proba(returns[-1:])[0]
+        means = model.means_.flatten()
+        sorted_idx = np.argsort(means)
+        if n_states == 3:
+            labels = {sorted_idx[0]: "Bear", sorted_idx[1]: "Neutral", sorted_idx[2]: "Bull"}
+        else:
+            labels = {sorted_idx[0]: "Bear", sorted_idx[1]: "Bull"}
+        regime = labels.get(current_state, "Neutral")
+        return {
+            "regime": regime,
+            "current_state": int(current_state),
+            "probs": [round(float(p), 3) for p in probs],
+            "means": [round(float(m), 4) for m in means]
+        }
+    except Exception as e:
+        return {"regime": "Neutral", "probs": [0.33, 0.34, 0.33], "means": [0.0, 0.0, 0.0]}
+
+def get_garch_forecast(ticker: str, period: str = "2y", horizon: int = 5):
+    """GARCH(1,1) volatility forecast.
+    Provides forward-looking volatility for better Monte Carlo and risk sizing.
+    High impact for accurate risk management."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        returns = hist['Close'].pct_change().dropna() * 100  # percent for arch
+        if len(returns) < 50:
+            return {"garch_vol_forecast": 0.0, "historical_vol": 0.0, "vol_ratio": 1.0}
+        from arch import arch_model
+        model = arch_model(returns, vol="Garch", p=1, q=1, dist="normal")
+        res = model.fit(disp="off", show_warning=False)
+        forecast = res.forecast(horizon=horizon)
+        vol_fc = float(np.sqrt(forecast.variance.iloc[-1].mean()))
+        hist_vol = float(returns.std())
+        ratio = vol_fc / hist_vol if hist_vol > 0 else 1.0
+        return {
+            "garch_vol_forecast": round(vol_fc, 2),
+            "historical_vol": round(hist_vol, 2),
+            "vol_ratio": round(ratio, 2)
+        }
+    except Exception as e:
+        return {"garch_vol_forecast": 0.0, "historical_vol": 0.0, "vol_ratio": 1.0}

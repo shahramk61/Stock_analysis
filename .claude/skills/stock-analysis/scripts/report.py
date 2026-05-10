@@ -24,6 +24,8 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• Piotroski F-Score: {signals['piotroski']}/9")
     print(f"• ATR Vol Cluster  : {signals['atr_vol']['atr_percent']}% ({signals['atr_vol']['vol_clustering']})")
     print(f"• Rel Strength SPY : {signals['rs']['rs_spy']:+.1f}% (Sector: {signals['rs']['rs_sector']:+.1f}%)")
+    print(f"• Market Regime    : {signals['regime']['regime']} (probs: {signals['regime']['probs']})")
+    print(f"• GARCH Vol Fcst   : {signals['garch']['garch_vol_forecast']}% (ratio: {signals['garch']['vol_ratio']})")
     
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")
