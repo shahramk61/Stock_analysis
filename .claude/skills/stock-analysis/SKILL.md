@@ -1,16 +1,55 @@
 ---
 name: stock-analysis
-description: Analyze stocks using configurable weighted scoring across fundamentals, technicals, valuation, sentiment, and optional ESG/quality. Includes Monte Carlo price simulation, sector/peer comparison, historical backtesting, alert logic, risk management, multi-horizon recommendations, and one-click export. Use when users want to evaluate a stock, compare equities, assess risk, or rank a watchlist.
+description: Analyze stocks using configurable weighted scoring across fundamentals, technicals, valuation, sentiment, and optional ESG/quality. Runs Python scripts locally via yfinance for real data and numpy Monte Carlo simulation. Includes sector/peer comparison, risk management, multi-horizon recommendations, alert logic, and one-click export. Use when users want to evaluate a stock, compare equities, assess risk, or rank a watchlist.
 allowed-tools: Read, Write, Bash, WebFetch, WebSearch
-version: 3.0
+version: 4.0
 last-updated: 2026-05-10
 ---
 
-# Stock Analysis Skill v3.0
+# Stock Analysis Skill v4.0
 
-Comprehensive stock analysis using a configurable multi-factor scoring model with Monte Carlo simulation, backtesting, ESG/quality pillar, alert logic, and report export.
+Comprehensive stock analysis powered by **local Python scripts** using `yfinance` for real data and `numpy` for a true 10,000-path Monte Carlo simulation. Claude orchestrates the scripts via Bash — no in-context math, no web scraping.
+
+## Setup (one-time)
+
+```bash
+cd {project_root}
+pip install -r requirements.txt
+```
+
+## Quick Start
+
+```bash
+# Single stock, balanced profile + ESG
+python .claude/skills/stock-analysis/scripts/analyze.py AAPL
+
+# Growth profile, no ESG
+python .claude/skills/stock-analysis/scripts/analyze.py NVDA --profile growth --no-esg
+
+# Save report to file
+python .claude/skills/stock-analysis/scripts/analyze.py MSFT --output MSFT_analysis_$(date +%Y%m%d).md
+```
 
 ---
+
+## Script Reference
+
+| Script | Purpose |
+|---|---|
+| `scripts/analyze.py` | Main entry point — orchestrates all steps |
+| `scripts/fetch_data.py` | yfinance data fetch + RSI/MACD/ATR/MA calculations |
+| `scripts/score.py` | Pillar scoring logic + risk flag detection |
+| `scripts/montecarlo.py` | 10,000-path GBM simulation (numpy) |
+| `scripts/report.py` | Markdown report generation |
+
+## Workflow (Claude as Orchestrator)
+
+1. Ask investor profile + ESG toggle
+2. Run: `python .claude/skills/stock-analysis/scripts/analyze.py [TICKER] --profile [profile] [--no-esg]`
+3. Parse the printed report and present it to the user
+4. If user says "export markdown": run with `--output [TICKER]_analysis_[date].md`
+5. If user says "export pdf": run with `--output` then convert via Chromium headless
+6. For multi-stock comparison: run analyze.py for each ticker, then compare composite scores
 
 ## Step 0 — Investor Profile (Ask First)
 

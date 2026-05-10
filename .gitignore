@@ -2,3 +2,9 @@
 *_analysis_*.md
 *_analysis_*.html
 *_analysis_*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
