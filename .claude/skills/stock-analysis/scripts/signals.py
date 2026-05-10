@@ -169,15 +169,19 @@ def get_relative_strength(ticker: str, period="2y"):
             'Sector': sector_etf.history(period=period)['Close'].pct_change()
         }).dropna()
         
-        # Correlation & relative performance
-        rs_spy = (data[ticker].iloc[-1] / data['SPY'].iloc[-1]) * 100 - 100
-        rs_sector = (data[ticker].iloc[-1] / data['Sector'].iloc[-1]) * 100 - 100
+        # Cumulative 6-month relative performance (trailing 126 trading days)
+        window = min(126, len(data))
+        cum_stock  = (1 + data[ticker].tail(window)).prod() - 1
+        cum_spy    = (1 + data['SPY'].tail(window)).prod() - 1
+        cum_sector = (1 + data['Sector'].tail(window)).prod() - 1
+        rs_spy    = float((cum_stock - cum_spy)    * 100)
+        rs_sector = float((cum_stock - cum_sector) * 100)
         
         return {
             "rs_spy": round(float(rs_spy), 1),
             "rs_sector": round(float(rs_sector), 1),
-            "outperforming_spy": rs_spy > 0,
-            "outperforming_sector": rs_sector > 0
+            "outperforming_spy": bool(rs_spy > 0),
+            "outperforming_sector": bool(rs_sector > 0)
         }
     except:
         return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}
