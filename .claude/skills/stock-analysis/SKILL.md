@@ -2,13 +2,15 @@
 name: stock-analysis
 description: Analyze stocks using configurable weighted scoring across fundamentals, technicals, valuation, sentiment, and optional ESG/quality. Runs Python scripts locally via yfinance for real data and numpy Monte Carlo simulation. Includes sector/peer comparison, risk management, multi-horizon recommendations, alert logic, and one-click export. Use when users want to evaluate a stock, compare equities, assess risk, or rank a watchlist.
 allowed-tools: Read, Write, Bash, WebFetch, WebSearch
-version: 4.0
+version: 4.1
 last-updated: 2026-05-10
 ---
 
-# Stock Analysis Skill v4.0
+# Stock Analysis Skill v4.1
 
 Comprehensive stock analysis powered by **local Python scripts** using `yfinance` for real data and `numpy` for a true 10,000-path Monte Carlo simulation. Claude orchestrates the scripts via Bash — no in-context math, no web scraping.
+
+**v4.1 Advanced Signals:** IVR + Options Skew · Altman Z-Score + Beneish M-Score · 3-Stage DCF with sensitivity table · Earnings surprise history + post-earnings drift · Rolling beta decomposition (market / sector / idiosyncratic)
 
 ## Setup (one-time)
 

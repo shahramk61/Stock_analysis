@@ -27,6 +27,20 @@
 - [x] Comprehensive README on main branch
 
 ## Milestone 3 — Advanced Features ✅
+- [x] Export (Markdown / PDF)
+- [x] Monte Carlo Simulation (log-normal GBM → upgraded to true 10,000-path numpy simulation in v4.0)
+- [x] ESG / Quality Pillar (toggleable)
+- [x] Alert & Re-analysis Logic
+- [x] Historical Backtesting
+
+## Milestone 4 — v4.1 Advanced Local Signals ✅
+- [x] **Signal 1:** IVR + Options Skew (Volatility Edge) — blended into Technicals pillar at 20%
+- [x] **Signal 2:** Altman Z-Score + Beneish M-Score — Financial Health section; Z-Score in ESG pillar
+- [x] **Signal 3:** 3-Stage DCF with WACC + 5×5 sensitivity table — blended into Valuation pillar
+- [x] **Signal 4:** Earnings surprise history (8 qtrs) + 5-day post-earnings drift — blended into Sentiment
+- [x] **Signal 5:** Rolling beta decomposition (market β, sector β, alpha, R², idio vol) — alpha ±5 pts to Technicals
+
+## Milestone 5 — Future Ideas
 - [x] **Export (Markdown / PDF)** — "export markdown" / "export pdf" triggers at end of every report
 - [x] **Monte Carlo Simulation** — log-normal GBM, median/10th/90th percentile, probability outputs for Intermediate and Long-term horizons
 - [x] **ESG / Quality Pillar** — toggleable 5th pillar (moat, governance, Piotroski F-Score, ROIC, controversies) with weight redistribution per profile
@@ -35,7 +49,7 @@
 
 ---
 
-## Milestone 4 — Future Ideas
+## Milestone 6 — Future Ideas
 
 | Idea | Effort | Notes |
 |---|---|---|
