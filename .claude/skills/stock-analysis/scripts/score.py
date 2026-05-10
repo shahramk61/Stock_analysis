@@ -1,5 +1,5 @@
 import pandas as pd
-from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength, get_market_regime, get_garch_forecast, get_momentum_and_52w_high, get_quality_accruals_gross_profit, get_amihud_illiquidity, get_share_turnover
+from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength, get_market_regime, get_garch_forecast, get_momentum_and_52w_high, get_quality_accruals_gross_profit, get_amihud_illiquidity, get_share_turnover, get_volume_price_correlation, get_simple_formulaic_alpha, get_obv, get_chaikin_money_flow
 from dcf import calculate_dcf
 
 def calculate_pillars(data: dict, profile: str = "Balanced"):
@@ -21,6 +21,10 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     quality = get_quality_accruals_gross_profit(ticker)
     amihud = get_amihud_illiquidity(ticker)
     turnover = get_share_turnover(ticker)
+    vol_price = get_volume_price_correlation(ticker)
+    formulaic_alpha = get_simple_formulaic_alpha(ticker)
+    obv = get_obv(ticker)
+    cmf = get_chaikin_money_flow(ticker)
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
@@ -34,12 +38,15 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     # Liquidity boost: higher turnover good, lower illiquidity good
     liquidity_boost = (turnover * 0.05) - (amihud * 5000)
 
+    # Volume & formulaic alpha boost to technicals
+    vol_alpha_boost = (vol_price['vol_price_corr'] * 15) + (formulaic_alpha['alpha'] * 25) + (cmf['cmf'] * 20) + (obv['obv_change_20d_pct'] * 0.08)
+
     fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2) + (piotroski * 2) + quality_boost + liquidity_boost))
 
     # Momentum boost
     mom_boost = (momentum['momentum_6m'] * 0.15) + (momentum['momentum_12m'] * 0.1) + (8 if momentum['near_52w_high'] else 0)
 
-    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100) + (rs['rs_spy'] * 0.3) + (5 if atr_vol['vol_clustering'] == "Low" else -10) + regime_bonus + vol_penalty + mom_boost))
+    technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100) + (rs['rs_spy'] * 0.3) + (5 if atr_vol['vol_clustering'] == "Low" else -10) + regime_bonus + vol_penalty + mom_boost + vol_alpha_boost))
 
     valuation = min(95, max(30, 60 + (dcf_upside * 0.3)))
     
@@ -79,6 +86,10 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "momentum": momentum,
             "quality": quality,
             "amihud": amihud,
-            "turnover": turnover
+            "turnover": turnover,
+            "vol_price": vol_price,
+            "formulaic_alpha": formulaic_alpha,
+            "obv": obv,
+            "cmf": cmf
         }
     }

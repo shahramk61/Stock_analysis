@@ -271,3 +271,90 @@ def get_share_turnover(ticker: str, period: str = "1y"):
         return {"turnover": round(turnover, 2)}
     except:
         return {"turnover": 0.0}
+
+def get_volume_price_correlation(ticker: str, period: str = "1y"):
+    """Custom Formulaic Alpha: correlation between price returns and volume changes.
+    Positive correlation = volume confirms price moves (bullish confirmation)."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        if len(hist) < 30:
+            return {"vol_price_corr": 0.0, "interpretation": "Neutral"}
+        returns = hist['Close'].pct_change().dropna()
+        vol_change = hist['Volume'].pct_change().dropna()
+        corr = returns.corr(vol_change)
+        interp = "Positive (volume confirms moves)" if corr > 0.1 else "Negative (volume diverges)" if corr < -0.1 else "Neutral"
+        return {
+            "vol_price_corr": round(float(corr), 3),
+            "interpretation": interp
+        }
+    except:
+        return {"vol_price_corr": 0.0, "interpretation": "Neutral"}
+
+def get_simple_formulaic_alpha(ticker: str, period: str = "1y"):
+    """Simple Alpha 101-inspired formulaic alpha: normalized intraday momentum ((close-open)/(high-low)).
+    Rolling 5-day average. Positive = bullish pressure."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        if len(hist) < 10:
+            return {"alpha": 0.0, "alpha_signal": "Neutral"}
+        close = hist['Close']
+        open_ = hist['Open']
+        high = hist['High']
+        low = hist['Low']
+        intraday = (close - open_) / (high - low + 1e-9)
+        alpha_val = intraday.rolling(5).mean().iloc[-1]
+        signal = "Bullish" if alpha_val > 0.1 else "Bearish" if alpha_val < -0.1 else "Neutral"
+        return {
+            "alpha": round(float(alpha_val), 3),
+            "alpha_signal": signal
+        }
+    except:
+        return {"alpha": 0.0, "alpha_signal": "Neutral"}
+
+def get_obv(ticker: str, period: str = "1y"):
+    """On-Balance Volume (OBV): cumulative signed volume based on price direction.
+    20-day % change signals accumulation/distribution."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        if len(hist) < 21:
+            return {"obv": 0.0, "obv_change_20d_pct": 0.0}
+        close = hist['Close']
+        volume = hist['Volume']
+        direction = np.sign(close.diff())
+        obv = (direction * volume).cumsum()
+        current_obv = obv.iloc[-1]
+        obv_20d_ago = obv.iloc[-21]
+        obv_change = ((current_obv - obv_20d_ago) / abs(obv_20d_ago) * 100) if obv_20d_ago != 0 else 0.0
+        return {
+            "obv": round(float(current_obv), 0),
+            "obv_change_20d_pct": round(float(obv_change), 1)
+        }
+    except:
+        return {"obv": 0.0, "obv_change_20d_pct": 0.0}
+
+def get_chaikin_money_flow(ticker: str, period: str = "1y", window: int = 20):
+    """Chaikin Money Flow (CMF): 20-period measure of buying vs selling pressure.
+    >0.05 Bullish, <-0.05 Bearish."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)
+        if len(hist) < window + 5:
+            return {"cmf": 0.0, "cmf_signal": "Neutral"}
+        high = hist['High']
+        low = hist['Low']
+        close = hist['Close']
+        volume = hist['Volume']
+        mfm = ((close - low) - (high - close)) / (high - low + 1e-9)
+        mfv = mfm * volume
+        cmf_series = mfv.rolling(window).sum() / volume.rolling(window).sum()
+        current_cmf = cmf_series.iloc[-1]
+        signal = "Bullish" if current_cmf > 0.05 else "Bearish" if current_cmf < -0.05 else "Neutral"
+        return {
+            "cmf": round(float(current_cmf), 3),
+            "cmf_signal": signal
+        }
+    except:
+        return {"cmf": 0.0, "cmf_signal": "Neutral"}

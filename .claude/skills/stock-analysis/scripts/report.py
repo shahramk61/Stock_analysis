@@ -32,6 +32,10 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• Accruals         : {signals['quality']['accruals']}% {'(Low ✓)' if signals['quality']['high_quality'] else ''}")
     print(f"• Amihud Illiq     : {signals['amihud']}")
     print(f"• Share Turnover   : {signals['turnover']}%")
+    print(f"• Vol-Price Corr   : {signals['vol_price']['vol_price_corr']} ({signals['vol_price']['interpretation']})")
+    print(f"• Formulaic Alpha  : {signals['formulaic_alpha']['alpha']} ({signals['formulaic_alpha']['alpha_signal']})")
+    print(f"• OBV (20d chg)    : {signals['obv']['obv_change_20d_pct']}%")
+    print(f"• Chaikin MF       : {signals['cmf']['cmf']} ({signals['cmf']['cmf_signal']})")
     
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")

@@ -1,7 +1,14 @@
-**Version:** 4.5  
+**Version:** 4.6  
 **Last Updated:** 2026-05-10  
 
-**New in v4.5**  
+**New in v4.6**  
+- Volume-Price Correlation (custom formulaic alpha: corr(returns, volume changes))  
+- Simple Alpha 101-inspired formulaic alpha (normalized intraday momentum)  
+- On-Balance Volume (OBV) with 20-day % change  
+- Chaikin Money Flow (CMF) for buying/selling pressure  
+- Volume/alpha boosts integrated into technicals scoring  
+
+**Previous (v4.5)**  
 - Amihud Illiquidity measure (avg |return| / $volume)  
 - Share Turnover (annualized volume / shares outstanding)  
 - Liquidity boosts integrated into fundamentals scoring  
