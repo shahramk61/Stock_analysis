@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from fetch_data import fetch_stock_data
 from score import calculate_pillars, check_risk_flags
 from montecarlo import run_monte_carlo
+from dcf import calculate_dcf
 from report import generate_report
 
 
@@ -37,6 +38,9 @@ def main():
 
     print(f"🔍 Fetching data for {ticker}...", file=sys.stderr)
     data = fetch_stock_data(ticker)
+
+    print(f"💹 Running DCF valuation...", file=sys.stderr)
+    data['dcf'] = calculate_dcf(data)
 
     print(f"📐 Scoring pillars ({args.profile} profile)...", file=sys.stderr)
     scores = calculate_pillars(data, profile=args.profile, esg_enabled=esg_enabled)

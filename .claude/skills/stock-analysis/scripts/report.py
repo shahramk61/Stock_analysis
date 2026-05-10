@@ -75,10 +75,12 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
       f"RSI {fmt(d.get('rsi'))}; {'Above' if d['current_price'] > d.get('ma50',0) else 'Below'} 50MA ({dollar(d.get('ma50'))}); "
       f"{'Above' if d['current_price'] > d.get('ma200',0) else 'Below'} 200MA ({dollar(d.get('ma200'))}); "
       f"MACD hist {fmt(d.get('macd_hist'))}; Vol {d.get('vol_trend','N/A')}{ve_str} |")
+    _dcf = d.get('dcf', {})
+    dcf_str = f"; DCF upside {pct(_dcf.get('upside_pct'))}" if _dcf.get('available') else ''
     a(f"| 💰 Valuation | {w['valuation']*100:.0f}% | {p['valuation']} | "
       f"Fwd P/E {fmt(d.get('forward_pe'))}; PEG {fmt(d.get('peg'))}; "
       f"P/S {fmt(d.get('ps_ratio'))}; EV/EBITDA {fmt(d.get('ev_ebitda'))}; "
-      f"52w position {fmt(d.get('week_52_pct'))}% |")
+      f"52w position {fmt(d.get('week_52_pct'))}%{dcf_str} |")
     a(f"| 🗣 Sentiment | {w['sentiment']*100:.0f}% | {p['sentiment']} | "
       f"Analyst mean {fmt(d.get('analyst_mean'))} ({d.get('num_analysts',0)} analysts); "
       f"Target upside {pct(d.get('target_upside'))}; Short {fmt(d.get('short_pct'))}% |")
@@ -178,6 +180,64 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
         a(f"| Put/Call Volume Ratio | {fmt(pc) if pc else 'N/A'} | {pc_emoji} {'Bearish (more puts)' if pc and pc > 1.3 else 'Bullish (more calls)' if pc and pc < 0.7 else 'Neutral'} |")
         a(f"")
         a(f"*Expiration: {opts.get('expiration','N/A')} | ATM Strike: {dollar(opts.get('atm_strike'))}*")
+        a(f"")
+    a(f"---")
+    a(f"")
+    dcf = d.get('dcf', {})
+    if dcf.get('available'):
+        iv      = dcf['intrinsic']
+        up      = dcf['upside_pct']
+        up_emoji = '🟢' if up > 15 else ('🟡' if up > 0 else '🔴')
+
+        a(f"## 💹 DCF Valuation (3-Stage Model)")
+        a(f"")
+        a(f"| | |")
+        a(f"|---|---|")
+        a(f"| Intrinsic Value (per share) | **{dollar(iv)}** |")
+        a(f"| Current Price | {dollar(price)} |")
+        a(f"| DCF Upside / Downside | {up_emoji} **{pct(up)}** |")
+        a(f"| Base FCF (TTM) | ${dcf['base_fcf']}B |")
+        a(f"")
+        a(f"**Assumptions:**  "
+          f"Stage 1 growth = {dcf['g1']}% (yrs 1–{dcf['stage1_years']}) → "
+          f"transition (yrs {dcf['stage1_years']+1}–{dcf['stage1_years']+dcf['stage2_years']}) → "
+          f"terminal = {dcf['terminal_growth']}%  |  "
+          f"WACC = {dcf['wacc']}% (Ke={dcf['ke']}%, Kd={dcf['kd']}%)")
+        a(f"")
+
+        # Projected FCF table (display years 1, 3, 5, 7, 10)
+        fcfs = dcf['projected_fcfs']
+        idxs = [0, 2, 4, 6, 9]
+        labels = ['Yr 1', 'Yr 3', 'Yr 5', 'Yr 7', 'Yr 10']
+        a(f"*Projected FCF ($B): " +
+          " · ".join(f"{labels[i]}={fcfs[i]}" for i in range(len(idxs)) if i < len(fcfs)) + "*")
+        a(f"")
+
+        # Sensitivity table
+        a(f"**Sensitivity Table — Intrinsic Value per Share ($)**")
+        a(f"")
+        tg_range   = dcf['tg_range']
+        wacc_range = dcf['wacc_range']
+        sensitivity = dcf['sensitivity']
+
+        header = "| WACC \\ TG | " + " | ".join(f"{tg*100:.1f}%" for tg in tg_range) + " |"
+        sep    = "|" + "---|" * (len(tg_range) + 1)
+        a(header)
+        a(sep)
+        for w in wacc_range:
+            row = sensitivity.get(round(w, 4), {})
+            cells = []
+            for tg in tg_range:
+                val = row.get(tg)
+                if val is None:
+                    cells.append('N/A')
+                else:
+                    marker = ' ◄' if abs(w - dcf['wacc']/100) < 0.001 and abs(tg - dcf['terminal_growth']/100) < 0.001 else ''
+                    cells.append(f"${val:.0f}{marker}")
+            bold = '**' if abs(w - dcf['wacc']/100) < 0.001 else ''
+            a(f"| {bold}{w*100:.2f}%{bold} | " + " | ".join(cells) + " |")
+        a(f"")
+        a(f"*◄ = base case. Values below current price ({dollar(price)}) shaded as downside.*")
         a(f"")
     a(f"---")
     a(f"")

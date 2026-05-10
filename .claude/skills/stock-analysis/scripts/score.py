@@ -160,7 +160,17 @@ def score_valuation(d):
                  65 if w52 < 60 else
                  50 if w52 < 80 else 30)
 
-    scores = [s for s in [fpe_score, peg_score, ps_score, ev_score, w52_score] if s is not None]
+    # DCF-implied upside (from 3-stage model if available)
+    dcf = d.get('dcf', {})
+    dcf_upside = dcf.get('upside_pct') if dcf.get('available') else None
+    dcf_score = (95 if dcf_upside is not None and dcf_upside > 40 else
+                 85 if dcf_upside is not None and dcf_upside > 25 else
+                 75 if dcf_upside is not None and dcf_upside > 10 else
+                 60 if dcf_upside is not None and dcf_upside > 0  else
+                 35 if dcf_upside is not None and dcf_upside > -15 else
+                 15 if dcf_upside is not None else None)
+
+    scores = [s for s in [fpe_score, peg_score, ps_score, ev_score, w52_score, dcf_score] if s is not None]
     return round(sum(scores) / len(scores)) if scores else 50
 
 
