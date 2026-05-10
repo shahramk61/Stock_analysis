@@ -154,23 +154,51 @@ def fetch_stock_data(ticker: str, period="2y"):
                         pass
         return None
 
-    revenue_now = safe_get(financials, ['Total Revenue', 'Revenue'])
+    revenue_now  = safe_get(financials, ['Total Revenue', 'Revenue'])
     revenue_prev = safe_get(financials, ['Total Revenue', 'Revenue'], col_idx=1)
     revenue_growth = (revenue_now / revenue_prev - 1) * 100 if revenue_now and revenue_prev else None
 
-    net_income_now = safe_get(financials, ['Net Income'])
+    net_income_now  = safe_get(financials, ['Net Income'])
     net_income_prev = safe_get(financials, ['Net Income'], col_idx=1)
 
-    gross_profit = safe_get(financials, ['Gross Profit'])
+    gross_profit      = safe_get(financials, ['Gross Profit'])
+    gross_profit_prev = safe_get(financials, ['Gross Profit'], col_idx=1)
     gross_margin = (gross_profit / revenue_now * 100) if gross_profit and revenue_now else info.get('grossMargins', 0) * 100
+
+    ebit = safe_get(financials, ['EBIT', 'Operating Income'])
+
+    cogs      = safe_get(financials, ['Cost Of Revenue', 'Cost Of Goods Sold'])
+    cogs_prev = safe_get(financials, ['Cost Of Revenue', 'Cost Of Goods Sold'], col_idx=1)
+
+    sga      = safe_get(financials, ['Selling General Administrative', 'Selling General And Administration'])
+    sga_prev = safe_get(financials, ['Selling General Administrative', 'Selling General And Administration'], col_idx=1)
 
     op_cashflow = safe_get(cashflow, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
     capex = safe_get(cashflow, ['Capital Expenditure', 'Capital Expenditures'])
     fcf = (op_cashflow + capex) if op_cashflow and capex else info.get('freeCashflow')
 
+    depreciation      = safe_get(cashflow, ['Depreciation And Amortization', 'Depreciation Amortization Depletion'])
+    depreciation_prev = safe_get(cashflow, ['Depreciation And Amortization', 'Depreciation Amortization Depletion'], col_idx=1)
+
     total_debt = safe_get(balance, ['Total Debt', 'Long Term Debt'])
-    equity = safe_get(balance, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity'])
+    equity     = safe_get(balance, ['Stockholders Equity', 'Total Stockholder Equity', 'Common Stock Equity'])
     de_ratio = (total_debt / equity) if total_debt and equity and equity != 0 else info.get('debtToEquity', 0) / 100
+
+    # Balance sheet items for Altman Z-Score and Beneish M-Score
+    total_assets           = safe_get(balance, ['Total Assets'])
+    total_assets_prev      = safe_get(balance, ['Total Assets'], col_idx=1)
+    current_assets         = safe_get(balance, ['Current Assets', 'Total Current Assets'])
+    current_assets_prev    = safe_get(balance, ['Current Assets', 'Total Current Assets'], col_idx=1)
+    current_liabilities    = safe_get(balance, ['Current Liabilities', 'Total Current Liabilities'])
+    current_liabilities_prev = safe_get(balance, ['Current Liabilities', 'Total Current Liabilities'], col_idx=1)
+    retained_earnings      = safe_get(balance, ['Retained Earnings'])
+    total_liabilities      = safe_get(balance, ['Total Liabilities Net Minority Interest', 'Total Liabilities'])
+    ppe                    = safe_get(balance, ['Net PPE', 'Net Property Plant Equipment'])
+    ppe_prev               = safe_get(balance, ['Net PPE', 'Net Property Plant Equipment'], col_idx=1)
+    accounts_receivable    = safe_get(balance, ['Accounts Receivable', 'Net Receivables', 'Receivables'])
+    accounts_receivable_prev = safe_get(balance, ['Accounts Receivable', 'Net Receivables', 'Receivables'], col_idx=1)
+    ltdebt                 = safe_get(balance, ['Long Term Debt', 'Long Term Debt And Capital Lease Obligation'])
+    ltdebt_prev            = safe_get(balance, ['Long Term Debt', 'Long Term Debt And Capital Lease Obligation'], col_idx=1)
 
     market_cap = info.get('marketCap', current_price * info.get('sharesOutstanding', 1))
     fcf_yield = (fcf / market_cap * 100) if fcf and market_cap else None
@@ -264,6 +292,35 @@ def fetch_stock_data(ticker: str, period="2y"):
         # ESG / Quality
         'roic': roic,
         'f_score': f_score,
+
+        # Raw financials for distress scores (Z-Score + M-Score)
+        'revenue_now': revenue_now,
+        'revenue_prev': revenue_prev,
+        'net_income_now': net_income_now,
+        'op_cashflow': op_cashflow,
+        'ebit': ebit,
+        'gross_profit': gross_profit,
+        'gross_profit_prev': gross_profit_prev,
+        'cogs': cogs,
+        'cogs_prev': cogs_prev,
+        'sga': sga,
+        'sga_prev': sga_prev,
+        'depreciation': depreciation,
+        'depreciation_prev': depreciation_prev,
+        'total_assets': total_assets,
+        'total_assets_prev': total_assets_prev,
+        'current_assets': current_assets,
+        'current_assets_prev': current_assets_prev,
+        'current_liabilities': current_liabilities,
+        'current_liabilities_prev': current_liabilities_prev,
+        'retained_earnings': retained_earnings,
+        'total_liabilities': total_liabilities,
+        'ppe': ppe,
+        'ppe_prev': ppe_prev,
+        'accounts_receivable': accounts_receivable,
+        'accounts_receivable_prev': accounts_receivable_prev,
+        'ltdebt': ltdebt,
+        'ltdebt_prev': ltdebt_prev,
 
         # Options metrics
         'options': get_options_metrics(stock, current_price, hist),

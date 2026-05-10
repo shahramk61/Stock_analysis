@@ -83,8 +83,10 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
       f"Analyst mean {fmt(d.get('analyst_mean'))} ({d.get('num_analysts',0)} analysts); "
       f"Target upside {pct(d.get('target_upside'))}; Short {fmt(d.get('short_pct'))}% |")
     if esg_enabled and p.get('esg') is not None:
+        dist = d.get('distress', {})
+        z_str = f"Z-Score {fmt(dist.get('z_score'))} ({dist.get('z_zone','N/A')}); " if dist.get('z_score') else ''
         a(f"| 🌱 ESG/Quality | {w.get('esg',0)*100:.0f}% | {p['esg']} | "
-          f"ROIC {pct(d.get('roic'))}; F-Score {d.get('f_score','N/A')}; ROE {pct(d.get('roe'))} |")
+          f"{z_str}ROIC {pct(d.get('roic'))}; F-Score {d.get('f_score','N/A')}; ROE {pct(d.get('roe'))} |")
     a(f"")
 
     formula_parts = ' + '.join(
@@ -97,6 +99,36 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
     a(f"**Composite = {formula_parts} = {composite}/100**")
     a(f"")
 
+    a(f"---")
+    a(f"")
+    distress = d.get('distress', {})
+    z = distress.get('z_score')
+    m = distress.get('m_score')
+    if z is not None or m is not None:
+        a(f"## 🏥 Financial Health")
+        a(f"")
+        a(f"| Model | Score | Zone | Interpretation |")
+        a(f"|---|---|---|---|")
+        if z is not None:
+            z_zone = distress.get('z_zone', 'N/A')
+            z_emoji = '🟢' if z > 2.99 else ('🟡' if z > 1.81 else '🔴')
+            a(f"| Altman Z-Score | **{z:.2f}** | {z_emoji} {z_zone} | "
+              f"{'Safe — low bankruptcy risk' if z > 2.99 else 'Grey Zone — monitor leverage' if z > 1.81 else 'Distress — elevated bankruptcy risk'} |")
+        if m is not None:
+            m_zone = distress.get('m_zone', 'N/A')
+            m_emoji = '🔴' if m > -2.22 else '🟢'
+            a(f"| Beneish M-Score | **{m:.3f}** | {m_emoji} {m_zone} | "
+              f"{'Earnings manipulation likely — investigate accruals' if m > -2.22 else 'No manipulation signal detected'} |")
+        zc = distress.get('z_components', {})
+        mc_ = distress.get('m_components', {})
+        if zc:
+            a(f"")
+            a(f"*Z-Score components: X1(WC/TA)={zc.get('x1','N/A')} · X2(RE/TA)={zc.get('x2','N/A')} · "
+              f"X3(EBIT/TA)={zc.get('x3','N/A')} · X4(Mkt/Liab)={zc.get('x4','N/A')} · X5(Rev/TA)={zc.get('x5','N/A')}*")
+        if mc_:
+            a(f"*M-Score key drivers: DSRI={mc_.get('DSRI','N/A')} · GMI={mc_.get('GMI','N/A')} · "
+              f"TATA={mc_.get('TATA','N/A')} · SGI={mc_.get('SGI','N/A')}*")
+        a(f"")
     a(f"---")
     a(f"")
     a(f"## Risk Management")

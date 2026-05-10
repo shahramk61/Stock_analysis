@@ -187,6 +187,127 @@ def score_sentiment(d):
     return round((analyst_score + target_score + short_score) / 3)
 
 
+def calculate_distress_scores(d):
+    """
+    Altman Z-Score (bankruptcy risk) and Beneish M-Score (earnings manipulation).
+    Returns dict with scores, zones, and component values.
+    """
+    def safe_div(a, b):
+        return a / b if a is not None and b and b != 0 else None
+
+    # ── Altman Z-Score ──────────────────────────────────────────────────
+    z_score = None
+    z_zone  = None
+    z_components = {}
+
+    ta = d.get('total_assets')
+    if ta and ta > 0:
+        try:
+            ca  = d.get('current_assets')  or 0
+            cl  = d.get('current_liabilities') or 0
+            re  = d.get('retained_earnings') or 0
+            tl  = d.get('total_liabilities') or 1
+            rev = d.get('revenue_now') or d.get('info', {}).get('totalRevenue')
+            ebit = d.get('ebit') or 0
+            mc   = d.get('market_cap') or 0
+
+            x1 = (ca - cl) / ta                    # Working Capital / Total Assets
+            x2 = re / ta                            # Retained Earnings / Total Assets
+            x3 = ebit / ta                          # EBIT / Total Assets
+            x4 = mc / tl if tl else 0              # Market Cap / Total Liabilities
+            x5 = rev / ta if rev else 0             # Revenue / Total Assets
+
+            z_score = round(1.2*x1 + 1.4*x2 + 3.3*x3 + 0.6*x4 + 1.0*x5, 2)
+            z_zone  = ('Safe'     if z_score > 2.99 else
+                       'Grey Zone' if z_score > 1.81 else
+                       'Distress')
+            z_components = {'x1': round(x1,3), 'x2': round(x2,3),
+                            'x3': round(x3,3), 'x4': round(x4,3), 'x5': round(x5,3)}
+        except Exception:
+            pass
+
+    # ── Beneish M-Score ─────────────────────────────────────────────────
+    m_score = None
+    m_zone  = None
+    m_components = {}
+
+    ta_t  = d.get('total_assets')
+    ta_t1 = d.get('total_assets_prev')
+    rev_t  = d.get('revenue_now')
+    rev_t1 = d.get('revenue_prev')
+
+    if ta_t and ta_t1 and ta_t > 0 and ta_t1 > 0 and rev_t and rev_t1:
+        try:
+            ar_t  = d.get('accounts_receivable') or 0
+            ar_t1 = d.get('accounts_receivable_prev') or 0
+            gp_t  = d.get('gross_profit') or 0
+            gp_t1 = d.get('gross_profit_prev') or 0
+            ca_t  = d.get('current_assets') or 0
+            ca_t1 = d.get('current_assets_prev') or 0
+            ppe_t  = d.get('ppe') or 0
+            ppe_t1 = d.get('ppe_prev') or 0
+            dep_t  = abs(d.get('depreciation') or 1)
+            dep_t1 = abs(d.get('depreciation_prev') or dep_t)
+            sga_t  = abs(d.get('sga') or 0)
+            sga_t1 = abs(d.get('sga_prev') or sga_t)
+            ni_t   = d.get('net_income_now') or 0
+            cfo_t  = d.get('op_cashflow') or 0
+            cl_t   = d.get('current_liabilities') or 0
+            cl_t1  = d.get('current_liabilities_prev') or 0
+            ltd_t  = d.get('ltdebt') or 0
+            ltd_t1 = d.get('ltdebt_prev') or 0
+
+            # Days Sales Receivable Index
+            dsri = safe_div(ar_t / rev_t, ar_t1 / rev_t1) if rev_t1 else 1.0
+            # Gross Margin Index
+            gmi = safe_div(gp_t1 / rev_t1, gp_t / rev_t) if (gp_t and gp_t1) else 1.0
+            # Asset Quality Index: non-current non-PPE assets / total assets
+            aq_t  = 1 - safe_div(ca_t  + ppe_t,  ta_t)  if ta_t  else 0
+            aq_t1 = 1 - safe_div(ca_t1 + ppe_t1, ta_t1) if ta_t1 else 0
+            aqi = safe_div(aq_t, aq_t1) if aq_t1 else 1.0
+            # Sales Growth Index
+            sgi = rev_t / rev_t1
+            # Depreciation Index
+            dep_rate_t  = dep_t  / (ppe_t  + dep_t)  if (ppe_t  + dep_t)  > 0 else 0
+            dep_rate_t1 = dep_t1 / (ppe_t1 + dep_t1) if (ppe_t1 + dep_t1) > 0 else dep_rate_t
+            depi = safe_div(dep_rate_t1, dep_rate_t) if dep_rate_t else 1.0
+            # SGA Index
+            sgai = safe_div(sga_t / rev_t, sga_t1 / rev_t1) if (sga_t and sga_t1 and rev_t1) else 1.0
+            # Total Accruals to Total Assets
+            tata = (ni_t - cfo_t) / ta_t
+            # Leverage Index
+            lev_t  = (ltd_t  + cl_t)  / ta_t
+            lev_t1 = (ltd_t1 + cl_t1) / ta_t1 if ta_t1 else lev_t
+            lvgi = safe_div(lev_t, lev_t1) if lev_t1 else 1.0
+
+            # Replace any None with neutral 1.0
+            vars_ = [dsri, gmi, aqi, sgi, depi, sgai, tata, lvgi]
+            dsri, gmi, aqi, sgi, depi, sgai, tata, lvgi = [v if v is not None else 1.0 for v in vars_]
+
+            m_score = round(
+                -4.84 + 0.920*dsri + 0.528*gmi + 0.404*aqi + 0.892*sgi
+                + 0.115*depi - 0.172*sgai + 4.679*tata - 0.327*lvgi, 3
+            )
+            m_zone = 'Possible Manipulator' if m_score > -2.22 else 'Non-Manipulator'
+            m_components = {
+                'DSRI': round(dsri, 3), 'GMI': round(gmi, 3),
+                'AQI': round(aqi, 3),  'SGI': round(sgi, 3),
+                'DEPI': round(depi, 3), 'SGAI': round(sgai, 3),
+                'TATA': round(tata, 4), 'LVGI': round(lvgi, 3),
+            }
+        except Exception:
+            pass
+
+    return {
+        'z_score': z_score,
+        'z_zone':  z_zone,
+        'z_components': z_components,
+        'm_score': m_score,
+        'm_zone':  m_zone,
+        'm_components': m_components,
+    }
+
+
 def score_esg(d):
     roic = d.get('roic')
     roic_score = (90 if roic and roic > 20 else
@@ -196,17 +317,29 @@ def score_esg(d):
                   30 if roic else 50)
 
     f = d.get('f_score', 3)
-    f_score = min(100, int(f / 6 * 100))  # scaled from partial F-score
+    f_score = min(100, int(f / 6 * 100))
 
     roe = d.get('roe', 0)
     roe_score = (90 if roe > 25 else
                  75 if roe > 15 else
                  60 if roe > 10 else 40)
 
-    return round((roic_score + f_score + roe_score) / 3)
+    # Incorporate Altman Z-Score into ESG/Quality pillar
+    distress = d.get('distress', {})
+    z = distress.get('z_score')
+    z_score_val = (90 if z is not None and z > 3.5 else
+                   75 if z is not None and z > 2.99 else
+                   55 if z is not None and z > 1.81 else
+                   20 if z is not None else 50)
+
+    scores = [roic_score, f_score, roe_score, z_score_val]
+    return round(sum(scores) / len(scores))
 
 
 def calculate_pillars(data, profile='balanced', esg_enabled=True):
+    # Compute distress scores once and store in data for use across scorers
+    data['distress'] = calculate_distress_scores(data)
+
     weights = PROFILES.get(profile.lower(), PROFILES['balanced'])
     if not esg_enabled:
         # redistribute ESG weight proportionally to other pillars
@@ -260,6 +393,17 @@ def check_risk_flags(data):
         flags.append(f'⚠️  High beta ({data["beta"]:.2f})')
     if (data.get('short_pct') or 0) > 20:
         flags.append(f'⚠️  Short interest > 20% ({data["short_pct"]:.1f}%)')
+
+    distress = data.get('distress', {})
+    z = distress.get('z_score')
+    if z is not None:
+        if z < 1.81:
+            flags.append(f'🚨 Altman Z-Score {z:.2f} — DISTRESS ZONE (bankruptcy risk elevated)')
+        elif z < 2.99:
+            flags.append(f'⚠️  Altman Z-Score {z:.2f} — Grey Zone (monitor closely)')
+    m = distress.get('m_score')
+    if m is not None and m > -2.22:
+        flags.append(f'🚨 Beneish M-Score {m:.3f} — Possible earnings manipulation (threshold: −2.22)')
 
     opts = data.get('options')
     if opts:
