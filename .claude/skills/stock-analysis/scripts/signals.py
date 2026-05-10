@@ -242,3 +242,54 @@ def get_garch_forecast(ticker: str, period: str = "2y", horizon: int = 5):
         }
     except Exception as e:
         return {"garch_vol_forecast": 0.0, "historical_vol": 0.0, "vol_ratio": 1.0}
+
+def get_momentum_and_52w_high(ticker: str):
+    """Momentum (6m/12m) + proximity to 52-week high.
+    High impact classic momentum factor + nearness to all-time high."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period="2y")
+        if len(hist) < 260:
+            return {"momentum_6m": 0.0, "momentum_12m": 0.0, "dist_to_52w_high": 0.0, "near_52w_high": False}
+        close = hist['Close'].dropna()
+        mom_6m = (close.iloc[-1] / close.iloc[-126] - 1) * 100
+        mom_12m = (close.iloc[-1] / close.iloc[-252] - 1) * 100 if len(close) > 252 else 0.0
+        high_52w = close.rolling(window=252, min_periods=200).max().iloc[-1]
+        dist = ((high_52w - close.iloc[-1]) / high_52w * 100) if high_52w > 0 else 0.0
+        near_high = dist < 10.0
+        return {
+            "momentum_6m": round(float(mom_6m), 1),
+            "momentum_12m": round(float(mom_12m), 1),
+            "dist_to_52w_high": round(float(dist), 1),
+            "near_52w_high": bool(near_high)
+        }
+    except:
+        return {"momentum_6m": 0.0, "momentum_12m": 0.0, "dist_to_52w_high": 0.0, "near_52w_high": False}
+
+def get_quality_accruals_gross_profit(ticker: str):
+    """Gross Profitability (Novy-Marx style) and Accruals.
+    Strong quality factors for fundamentals."""
+    stock = yf.Ticker(ticker)
+    try:
+        inc = stock.income_stmt
+        bal = stock.balance_sheet
+        cf = stock.cashflow
+        if inc.empty or bal.empty or cf.empty:
+            return {"gross_profitability": 0.0, "accruals": 0.0, "high_quality": False}
+        # Latest annual
+        revenue = float(inc.loc['Total Revenue'].iloc[0]) if 'Total Revenue' in inc.index else 0.0
+        cogs = float(inc.loc['Cost Of Revenue'].iloc[0]) if 'Cost Of Revenue' in inc.index else 0.0
+        gross_profit = revenue - cogs
+        total_assets = float(bal.loc['Total Assets'].iloc[0]) if 'Total Assets' in bal.index else 1.0
+        gp_ratio = gross_profit / total_assets if total_assets != 0 else 0.0
+        net_income = float(inc.loc['Net Income'].iloc[0]) if 'Net Income' in inc.index else 0.0
+        op_cf = float(cf.loc['Operating Cash Flow'].iloc[0]) if 'Operating Cash Flow' in cf.index else 0.0
+        accruals_ratio = (net_income - op_cf) / total_assets if total_assets != 0 else 0.0
+        high_quality = (gp_ratio > 0.15 and accruals_ratio < 0.05)
+        return {
+            "gross_profitability": round(gp_ratio * 100, 1),
+            "accruals": round(accruals_ratio * 100, 1),
+            "high_quality": bool(high_quality)
+        }
+    except:
+        return {"gross_profitability": 0.0, "accruals": 0.0, "high_quality": False}

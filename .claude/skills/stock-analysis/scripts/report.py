@@ -26,6 +26,10 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• Rel Strength SPY : {signals['rs']['rs_spy']:+.1f}% (Sector: {signals['rs']['rs_sector']:+.1f}%)")
     print(f"• Market Regime    : {signals['regime']['regime']} (probs: {signals['regime']['probs']})")
     print(f"• GARCH Vol Fcst   : {signals['garch']['garch_vol_forecast']}% (ratio: {signals['garch']['vol_ratio']})")
+    print(f"• Momentum 6m/12m  : {signals['momentum']['momentum_6m']}% / {signals['momentum']['momentum_12m']}%")
+    print(f"• 52w High Dist    : {signals['momentum']['dist_to_52w_high']}% {'(Near High ✓)' if signals['momentum']['near_52w_high'] else ''}")
+    print(f"• Gross Profitab.  : {signals['quality']['gross_profitability']}%")
+    print(f"• Accruals         : {signals['quality']['accruals']}% {'(Low ✓)' if signals['quality']['high_quality'] else ''}")
     
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")
