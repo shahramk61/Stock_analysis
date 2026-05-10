@@ -60,12 +60,13 @@ Score each pillar 0–100, then apply the chosen weights:
 
 | Metric | What to assess |
 |---|---|
-| P/E (trailing & forward) | Compare to sector median and 5yr history |
-| PEG ratio | <1.0 potentially undervalued for growth, >2.0 expensive |
-| P/S ratio | Compare to sector; high P/S needs strong revenue growth |
-| EV/EBITDA | <10 value territory; compare to peers |
-| DCF implied upside | >20% upside = good; >40% = undervalued |
-| Price vs 52-week range | Near 52w low with strong fundamentals = opportunity |
+| Forward P/E | **Primary metric.** Compare to sector median, 5yr avg, and peers. Discount if >20% above both. |
+| Trailing P/E | Context for Forward P/E; wide gap signals expected inflection in earnings |
+| PEG ratio | <1.0 potentially undervalued for growth, >2.0 expensive; use forward EPS growth |
+| P/S ratio | Compare to sector; high P/S requires >20% revenue growth to justify |
+| EV/EBITDA | <10 value territory; most comparable across capital structures |
+| DCF implied upside | >20% upside = good; >40% = undervalued; state discount rate and assumptions |
+| Price vs 52-week range | Near 52w low with strong fundamentals = opportunity; near high = lower margin of safety |
 
 ### Pillar 4 — Sentiment
 
@@ -175,6 +176,7 @@ Always include upcoming events:
 > 3. **If WebFetch fails**, state clearly: "Live data unavailable — the following uses [source/assumption]. Please verify before trading."
 > 4. **Directional estimates only** when data is missing: "Revenue growth appears positive based on [X], but exact figure unavailable."
 > 5. **Never make a Buy recommendation** when more than 2 key metrics are missing.
+> 6. **Price target guardrail**: Do not set a price target more than ±30% from current price unless you provide explicit, data-backed justification (e.g., confirmed DCF, imminent catalyst, or comparable acquisition premium). Flag any target beyond this range with ⚠️.
 
 ---
 

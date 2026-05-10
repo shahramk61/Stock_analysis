@@ -1,5 +1,5 @@
 ---
-description: Score and rank a list of tickers using the stock-analysis skill. Usage: /watchlist TICKER1 TICKER2 ... Outputs a ranked table with composite scores, ratings, and one-line theses.
+description: "Score and rank a list of tickers using the stock-analysis skill. Usage: /watchlist TICKER1 TICKER2 ... Outputs a ranked table with composite scores, ratings, and one-line theses."
 allowed-tools: Read, Write, Bash, WebFetch, WebSearch, Skill
 ---
 

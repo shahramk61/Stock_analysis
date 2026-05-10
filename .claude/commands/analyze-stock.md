@@ -1,5 +1,5 @@
 ---
-description: Analyze one or more stocks using the weighted scoring model with risk management, peer comparison, and multi-horizon recommendations. Usage: /analyze-stock TICKER [TICKER2 TICKER3 ...]
+description: "Analyze one or more stocks using the weighted scoring model with risk management, peer comparison, and multi-horizon recommendations. Usage: /analyze-stock TICKER [TICKER2 TICKER3 ...]"
 allowed-tools: Read, Write, Bash, WebFetch, WebSearch, Skill
 ---
 
