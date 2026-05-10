@@ -10,8 +10,13 @@ def get_iv_rank_and_skew(ticker: str):
         expirations = stock.options
         if not expirations:
             return {"ivr": 50, "skew": 0.0, "iv": 0.0, "put_call_ratio": 1.0}
-        
-        chain = stock.option_chain(expirations[0])
+
+        # Skip near-expiry options (inflated gamma/IV); use first expiry ≥ 7 days out
+        min_date = datetime.now() + timedelta(days=7)
+        valid = [e for e in expirations if datetime.strptime(e, '%Y-%m-%d') >= min_date]
+        if not valid:
+            valid = expirations
+        chain = stock.option_chain(valid[0])
         calls = chain.calls
         puts = chain.puts
         
@@ -62,13 +67,14 @@ def calculate_altman_beneish(ticker: str):
 def get_earnings_surprise(ticker: str):
     stock = yf.Ticker(ticker)
     try:
-        earnings = stock.earnings
-        if earnings.empty:
+        ed = stock.earnings_dates
+        if ed is None or ed.empty:
             return {"avg_surprise_pct": 0.0, "post_earnings_drift": 0.0}
-        surprise = earnings.get('Surprise', pd.Series([0]))
-        avg_surprise = surprise.mean() if not surprise.empty else 0.0
+        past = ed[ed['Reported EPS'].notna()].head(8)
+        surprises = past['Surprise(%)'].dropna()
+        avg_surprise = float(surprises.mean()) if not surprises.empty else 0.0
         return {
-            "avg_surprise_pct": round(float(avg_surprise * 100), 2),
+            "avg_surprise_pct": round(avg_surprise, 2),
             "post_earnings_drift": 1.8
         }
     except:
@@ -85,11 +91,11 @@ def get_rolling_beta(ticker: str, period="2y"):
         
         X = sm.add_constant(data['SPY'])
         model = sm.OLS(data[ticker], X).fit()
-        
+
         return {
-            "beta": round(float(model.params[1]), 3),
-            "alpha": round(float(model.params[0] * 252), 4),
-            "r_squared": round(float(model.rsquared), 3)
+            "beta":      round(float(model.params['SPY']),       3),
+            "alpha":     round(float(model.params['const'] * 252), 4),
+            "r_squared": round(float(model.rsquared),             3)
         }
     except:
         return {"beta": 1.0, "alpha": 0.0, "r_squared": 0.0}

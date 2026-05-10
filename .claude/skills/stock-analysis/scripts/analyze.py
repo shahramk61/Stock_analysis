@@ -1,6 +1,10 @@
 import sys
+import os
 import json
 import argparse
+
+sys.path.insert(0, os.path.dirname(__file__))
+
 from fetch_data import fetch_stock_data
 from score import calculate_pillars
 from montecarlo import run_monte_carlo
@@ -18,9 +22,13 @@ def main():
     data = fetch_stock_data(args.ticker)
     scores = calculate_pillars(data, args.profile)
     
-    volatility = data['info'].get('beta', 1.0) * 0.25
-    drift = (scores['overall'] - 50) / 100 * 0.30
-    mc_result = run_monte_carlo(data['current_price'], volatility, drift, days=252)
+    annual_vol_pct = data.get('annual_vol', data['info'].get('beta', 1.0) * 25)
+    mc_result = run_monte_carlo(
+        current_price=data['current_price'],
+        annual_vol_pct=annual_vol_pct,
+        composite_score=scores['overall'],
+        days=252
+    )
     
     if args.output in ["report", "both"]:
         generate_report(data, scores, mc_result, args.profile)

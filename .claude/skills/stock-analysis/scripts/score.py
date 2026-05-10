@@ -11,13 +11,15 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     distress = calculate_altman_beneish(ticker)
     earnings = get_earnings_surprise(ticker)
     beta = get_rolling_beta(ticker)
-    dcf_val = calculate_dcf(ticker, current_price)
+    dcf_val = calculate_dcf(data)
     
-    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_val.get('upside', 0) * 20)))
-    
+    dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
+
+    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2)))
+
     technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100)))
-    
-    valuation = min(95, max(30, (dcf_val.get('fair_value_score', 70)) + (100 if dcf_val.get('upside', 0) > 20 else 40)))
+
+    valuation = min(95, max(30, 60 + (dcf_upside * 0.3)))
     
     sentiment = min(95, max(30, 65 + (earnings['avg_surprise_pct'] * 1.2)))
     
