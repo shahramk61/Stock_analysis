@@ -81,9 +81,14 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
       f"Fwd P/E {fmt(d.get('forward_pe'))}; PEG {fmt(d.get('peg'))}; "
       f"P/S {fmt(d.get('ps_ratio'))}; EV/EBITDA {fmt(d.get('ev_ebitda'))}; "
       f"52w position {fmt(d.get('week_52_pct'))}%{dcf_str} |")
+    eh = d.get('earnings_history', {})
+    eh_str = (f"; Beats {eh.get('beats',0)}/{eh.get('n_quarters',0)} qtrs "
+              f"(avg {pct(eh.get('avg_surprise_pct'))}); "
+              f"avg 5d drift {pct(eh.get('avg_drift_5d'))}"
+              if eh and eh.get('avg_surprise_pct') is not None else "")
     a(f"| 🗣 Sentiment | {w['sentiment']*100:.0f}% | {p['sentiment']} | "
       f"Analyst mean {fmt(d.get('analyst_mean'))} ({d.get('num_analysts',0)} analysts); "
-      f"Target upside {pct(d.get('target_upside'))}; Short {fmt(d.get('short_pct'))}% |")
+      f"Target upside {pct(d.get('target_upside'))}; Short {fmt(d.get('short_pct'))}%{eh_str} |")
     if esg_enabled and p.get('esg') is not None:
         dist = d.get('distress', {})
         z_str = f"Z-Score {fmt(dist.get('z_score'))} ({dist.get('z_zone','N/A')}); " if dist.get('z_score') else ''
@@ -180,6 +185,36 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
         a(f"| Put/Call Volume Ratio | {fmt(pc) if pc else 'N/A'} | {pc_emoji} {'Bearish (more puts)' if pc and pc > 1.3 else 'Bullish (more calls)' if pc and pc < 0.7 else 'Neutral'} |")
         a(f"")
         a(f"*Expiration: {opts.get('expiration','N/A')} | ATM Strike: {dollar(opts.get('atm_strike'))}*")
+        a(f"")
+    eh = d.get('earnings_history', {})
+    if eh and eh.get('quarters'):
+        cb = eh.get('consecutive_beats', 0)
+        beat_emoji = '🟢' if eh.get('beat_rate', 0) >= 75 else ('🟡' if eh.get('beat_rate', 0) >= 50 else '🔴')
+        drift_avg  = eh.get('avg_drift_5d')
+        drift_emoji = '🟢' if drift_avg and drift_avg > 1 else ('🟡' if drift_avg and drift_avg > -1 else '🔴')
+
+        a(f"## 📅 Earnings Surprise History (Last {eh['n_quarters']} Quarters)")
+        a(f"")
+        a(f"| Quarter | EPS Est. | EPS Actual | Surprise | 5-Day Drift |")
+        a(f"|---|---|---|---|---|")
+        for q in eh['quarters']:
+            s = q.get('surprise_pct')
+            s_str = (f"{s:+.1f}% {'✅' if s > 0 else '❌'}" if s is not None else 'N/A')
+            dr = q.get('drift_5d')
+            dr_str = (f"{dr:+.1f}%" if dr is not None else 'N/A')
+            a(f"| {q['date'][:7]} | "
+              f"${fmt(q.get('eps_estimate'))} | "
+              f"${fmt(q.get('eps_actual'))} | "
+              f"{s_str} | {dr_str} |")
+        a(f"")
+        a(f"**Summary:** {beat_emoji} Beat {eh['beats']}/{eh['n_quarters']} quarters "
+          f"({fmt(eh.get('beat_rate'))}% beat rate)  |  "
+          f"Avg surprise: {pct(eh.get('avg_surprise_pct'))}  |  "
+          f"{drift_emoji} Avg 5-day post-earnings drift: {pct(drift_avg)}")
+        if cb >= 3:
+            a(f"🔥 **{cb} consecutive beats** — strong execution momentum")
+        elif cb == 0:
+            a(f"⚠️ Most recent quarter was a miss")
         a(f"")
     a(f"---")
     a(f"")

@@ -174,6 +174,34 @@ def score_valuation(d):
     return round(sum(scores) / len(scores)) if scores else 50
 
 
+def score_earnings_history(earnings):
+    """Score based on EPS surprise history and post-earnings drift."""
+    if not earnings or earnings.get('avg_surprise_pct') is None:
+        return None
+
+    avg_surprise = earnings['avg_surprise_pct']
+    beat_rate    = earnings.get('beat_rate') or 50
+    avg_drift    = earnings.get('avg_drift_5d') or 0
+
+    surprise_score = (90 if avg_surprise > 10 else
+                      80 if avg_surprise >  5 else
+                      70 if avg_surprise >  2 else
+                      55 if avg_surprise >  0 else
+                      35 if avg_surprise > -3 else 15)
+
+    beat_score = (90 if beat_rate >= 90 else
+                  80 if beat_rate >= 75 else
+                  65 if beat_rate >= 50 else
+                  40 if beat_rate >= 25 else 20)
+
+    drift_score = (85 if avg_drift >  3 else
+                   70 if avg_drift >  1 else
+                   55 if avg_drift > -1 else
+                   35 if avg_drift > -3 else 20)
+
+    return round((surprise_score + beat_score + drift_score) / 3)
+
+
 def score_sentiment(d):
     mean = d.get('analyst_mean', 3.0)
     analyst_score = (90 if mean <= 1.5 else
@@ -194,7 +222,13 @@ def score_sentiment(d):
                    65 if short < 10 else
                    40 if short < 20 else 20)
 
-    return round((analyst_score + target_score + short_score) / 3)
+    # Earnings surprise history (blended in when available)
+    earnings_score = score_earnings_history(d.get('earnings_history'))
+
+    scores = [analyst_score, target_score, short_score]
+    if earnings_score is not None:
+        scores.append(earnings_score)
+    return round(sum(scores) / len(scores))
 
 
 def calculate_distress_scores(d):
@@ -403,6 +437,16 @@ def check_risk_flags(data):
         flags.append(f'⚠️  High beta ({data["beta"]:.2f})')
     if (data.get('short_pct') or 0) > 20:
         flags.append(f'⚠️  Short interest > 20% ({data["short_pct"]:.1f}%)')
+
+    eh = data.get('earnings_history', {})
+    if eh:
+        misses = eh.get('misses', 0)
+        n = eh.get('n_quarters', 0)
+        if n >= 2 and misses >= 2 and (misses / n) >= 0.5:
+            flags.append(f'⚠️  Earnings misses in {misses}/{n} recent quarters — weak execution')
+        avg_drift = eh.get('avg_drift_5d')
+        if avg_drift is not None and avg_drift < -3:
+            flags.append(f'⚠️  Avg 5-day post-earnings drift {avg_drift:+.1f}% — market consistently disappointed')
 
     distress = data.get('distress', {})
     z = distress.get('z_score')

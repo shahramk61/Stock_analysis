@@ -111,6 +111,86 @@ def get_options_metrics(stock, current_price, hist):
         return None
 
 
+def _count_consecutive_beats(quarters):
+    count = 0
+    for q in quarters:
+        if (q.get('surprise_pct') or -1) > 0:
+            count += 1
+        else:
+            break
+    return count
+
+
+def get_earnings_history(stock, hist, n_quarters=8):
+    """Fetch last N quarters of EPS surprise history and 5-day post-earnings drift."""
+    try:
+        ed = stock.earnings_dates
+        if ed is None or ed.empty:
+            return None
+
+        # Keep only rows with a reported EPS (past earnings)
+        past = ed[ed['Reported EPS'].notna()].head(n_quarters)
+        if past.empty:
+            return None
+
+        # Normalise history index to tz-naive for comparisons
+        h = hist.copy()
+        if h.index.tzinfo is not None:
+            h.index = h.index.tz_localize(None)
+
+        quarters = []
+        for date, row in past.iterrows():
+            surprise = row.get('Surprise(%)')
+            eps_est  = row.get('EPS Estimate')
+            eps_act  = row.get('Reported EPS')
+
+            # Normalise earnings date to tz-naive
+            try:
+                d_naive = pd.Timestamp(date).tz_localize(None) if date.tzinfo else pd.Timestamp(date)
+            except Exception:
+                d_naive = None
+
+            drift_5d = None
+            if d_naive is not None:
+                try:
+                    pre    = h[h.index <= d_naive].tail(1)
+                    post   = h[h.index  > d_naive].head(5)
+                    if not pre.empty and len(post) == 5:
+                        drift_5d = round(
+                            (float(post['Close'].iloc[-1]) / float(pre['Close'].iloc[-1]) - 1) * 100, 2
+                        )
+                except Exception:
+                    pass
+
+            quarters.append({
+                'date':         str(date)[:10],
+                'eps_estimate': float(eps_est) if eps_est is not None else None,
+                'eps_actual':   float(eps_act) if eps_act is not None else None,
+                'surprise_pct': float(surprise) if surprise is not None else None,
+                'drift_5d':     drift_5d,
+            })
+
+        if not quarters:
+            return None
+
+        surprises = [q['surprise_pct'] for q in quarters if q['surprise_pct'] is not None]
+        drifts    = [q['drift_5d']     for q in quarters if q['drift_5d']     is not None]
+        beats     = sum(1 for s in surprises if s > 0)
+
+        return {
+            'quarters':           quarters,
+            'n_quarters':         len(quarters),
+            'avg_surprise_pct':   round(sum(surprises) / len(surprises), 2) if surprises else None,
+            'beat_rate':          round(beats / len(surprises) * 100, 1)    if surprises else None,
+            'beats':              beats,
+            'misses':             len(surprises) - beats,
+            'avg_drift_5d':       round(sum(drifts) / len(drifts), 2)       if drifts    else None,
+            'consecutive_beats':  _count_consecutive_beats(quarters),
+        }
+    except Exception:
+        return None
+
+
 def fetch_stock_data(ticker: str, period="2y"):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -321,6 +401,9 @@ def fetch_stock_data(ticker: str, period="2y"):
         'accounts_receivable_prev': accounts_receivable_prev,
         'ltdebt': ltdebt,
         'ltdebt_prev': ltdebt_prev,
+
+        # Earnings history (surprise + post-earnings drift)
+        'earnings_history': get_earnings_history(stock, hist),
 
         # Options metrics
         'options': get_options_metrics(stock, current_price, hist),
