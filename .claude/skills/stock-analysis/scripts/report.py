@@ -69,10 +69,12 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
       f"Rev growth {pct(d.get('revenue_growth'))}; EPS growth {pct(d.get('eps_growth'))}; "
       f"Gross margin {fmt(d.get('gross_margin'))}%; D/E {fmt(d.get('de_ratio'))}; "
       f"FCF yield {pct(d.get('fcf_yield'))}; ROE {pct(d.get('roe'))} |")
+    ve = p.get('vol_edge')
+    ve_str = f"; Vol Edge {ve}/100" if ve is not None else ""
     a(f"| 📉 Technicals | {w['technicals']*100:.0f}% | {p['technicals']} | "
       f"RSI {fmt(d.get('rsi'))}; {'Above' if d['current_price'] > d.get('ma50',0) else 'Below'} 50MA ({dollar(d.get('ma50'))}); "
       f"{'Above' if d['current_price'] > d.get('ma200',0) else 'Below'} 200MA ({dollar(d.get('ma200'))}); "
-      f"MACD hist {fmt(d.get('macd_hist'))}; Vol {d.get('vol_trend','N/A')} |")
+      f"MACD hist {fmt(d.get('macd_hist'))}; Vol {d.get('vol_trend','N/A')}{ve_str} |")
     a(f"| 💰 Valuation | {w['valuation']*100:.0f}% | {p['valuation']} | "
       f"Fwd P/E {fmt(d.get('forward_pe'))}; PEG {fmt(d.get('peg'))}; "
       f"P/S {fmt(d.get('ps_ratio'))}; EV/EBITDA {fmt(d.get('ev_ebitda'))}; "
@@ -117,6 +119,34 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
         a(f"✅ No flags identified")
     a(f"")
 
+    a(f"---")
+    a(f"")
+    opts = d.get('options')
+    ve_score = p.get('vol_edge')
+    if opts:
+        ivr   = opts.get('ivr')
+        skew  = opts.get('skew', 0)
+        pc    = opts.get('pc_ratio')
+
+        ivr_emoji  = ('🔴' if ivr is not None and ivr >= 70 else
+                      '🟡' if ivr is not None and ivr >= 40 else '🟢')
+        skew_emoji = ('🔴' if skew > 0.20 else '🟡' if skew > 0.05 else '🟢')
+        pc_emoji   = ('🔴' if pc is not None and pc > 1.3 else
+                      '🟢' if pc is not None and pc < 0.7 else '🟡')
+
+        a(f"## 📈 Options Signal" + (f"  (Vol Edge Score: {ve_score}/100)" if ve_score is not None else ""))
+        a(f"")
+        a(f"| Metric | Value | Signal |")
+        a(f"|---|---|---|")
+        a(f"| IV Rank (IVR) | {fmt(ivr, 0)}% | {ivr_emoji} {opts.get('ivr_label','N/A')} |")
+        a(f"| ATM Call IV | {fmt(opts.get('atm_call_iv'))}% | — |")
+        a(f"| ATM Put IV  | {fmt(opts.get('atm_put_iv'))}%  | — |")
+        a(f"| Avg ATM IV  | {fmt(opts.get('avg_atm_iv'))}%  | blended into Technicals score |")
+        a(f"| Skew (put−call)/avg | {fmt(skew, 3)} | {skew_emoji} {opts.get('skew_label','N/A')} |")
+        a(f"| Put/Call Volume Ratio | {fmt(pc) if pc else 'N/A'} | {pc_emoji} {'Bearish (more puts)' if pc and pc > 1.3 else 'Bullish (more calls)' if pc and pc < 0.7 else 'Neutral'} |")
+        a(f"")
+        a(f"*Expiration: {opts.get('expiration','N/A')} | ATM Strike: {dollar(opts.get('atm_strike'))}*")
+        a(f"")
     a(f"---")
     a(f"")
     a(f"## 📊 Monte Carlo Simulation (10,000 paths, GBM)")

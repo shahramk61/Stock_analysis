@@ -49,6 +49,40 @@ def score_fundamentals(d):
     return round(sum(scores) / len(scores)) if scores else 50
 
 
+def score_volatility_edge(opts):
+    """Score options signals 0-100. High score = favorable vol environment for longs."""
+    if opts is None:
+        return None
+
+    ivr = opts.get('ivr', 50)
+    # Low IVR = cheap options, less fear priced in = bullish
+    # High IVR = expensive vol, market fear = bearish for longs
+    ivr_score = (85 if ivr is not None and ivr < 20 else
+                 75 if ivr is not None and ivr < 35 else
+                 60 if ivr is not None and ivr < 55 else
+                 45 if ivr is not None and ivr < 70 else
+                 30 if ivr is not None and ivr < 85 else
+                 20 if ivr is not None else 50)
+
+    skew = opts.get('skew', 0)
+    # Neutral skew is healthy; heavy put skew signals fear/downside concern
+    skew_score = (75 if skew < -0.05 else          # call skew: mild bullish
+                  68 if abs(skew) <= 0.05 else      # neutral
+                  58 if 0.05 < skew <= 0.15 else    # mild put skew: normal
+                  42 if 0.15 < skew <= 0.30 else    # moderate: caution
+                  25)                               # heavy put skew: fear
+
+    pc = opts.get('pc_ratio')
+    # Low P/C = more calls = bullish; high P/C = more puts = bearish
+    pc_score = (82 if pc is not None and pc < 0.5 else
+                72 if pc is not None and pc < 0.7 else
+                60 if pc is not None and pc < 1.0 else
+                48 if pc is not None and pc < 1.3 else
+                32 if pc is not None else 50)
+
+    return round((ivr_score + skew_score + pc_score) / 3)
+
+
 def score_technicals(d):
     rsi = d.get('rsi', 50)
     rsi_score = (70 if 40 <= rsi <= 60 else
@@ -78,7 +112,13 @@ def score_technicals(d):
                  60 if 3 < atr_pct <= 5 else
                  40 if atr_pct > 5 else 65)
 
-    return round((rsi_score + ma_score + macd_score + vol_score + atr_score) / 5)
+    base = round((rsi_score + ma_score + macd_score + vol_score + atr_score) / 5)
+
+    # Blend in volatility edge (20% weight) when options data is available
+    ve = score_volatility_edge(d.get('options'))
+    if ve is not None:
+        return round(0.80 * base + 0.20 * ve)
+    return base
 
 
 def score_valuation(d):
@@ -177,15 +217,17 @@ def calculate_pillars(data, profile='balanced', esg_enabled=True):
 
     pillars = {
         'fundamentals': score_fundamentals(data),
-        'technicals':   score_technicals(data),
+        'technicals':   score_technicals(data),   # includes 20% vol-edge blend
         'valuation':    score_valuation(data),
         'sentiment':    score_sentiment(data),
         'esg':          score_esg(data) if esg_enabled else None,
+        'vol_edge':     score_volatility_edge(data.get('options')),  # display only
     }
 
     composite = sum(
         pillars[k] * weights.get(k, 0)
-        for k in pillars if pillars[k] is not None
+        for k in pillars
+        if pillars[k] is not None and k != 'vol_edge'  # vol_edge is display-only
     )
 
     rating_label, rating_emoji = 'Hold/Watch', '🟡'
@@ -218,4 +260,16 @@ def check_risk_flags(data):
         flags.append(f'⚠️  High beta ({data["beta"]:.2f})')
     if (data.get('short_pct') or 0) > 20:
         flags.append(f'⚠️  Short interest > 20% ({data["short_pct"]:.1f}%)')
+
+    opts = data.get('options')
+    if opts:
+        ivr = opts.get('ivr')
+        if ivr is not None and ivr >= 80:
+            flags.append(f'⚠️  IV Rank {ivr:.0f}% — very expensive options, elevated fear')
+        if opts.get('skew', 0) > 0.25:
+            flags.append(f'⚠️  Heavy put skew ({opts["skew"]:.2f}) — significant downside fear priced in')
+        pc = opts.get('pc_ratio')
+        if pc is not None and pc > 1.5:
+            flags.append(f'⚠️  Put/Call ratio {pc:.2f} — heavy put buying, bearish signal')
+
     return flags

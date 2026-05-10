@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def calculate_rsi(prices, period=14):
@@ -31,6 +31,84 @@ def calculate_atr(hist, period=14):
         (low - close.shift()).abs()
     ], axis=1).max(axis=1)
     return float(tr.rolling(window=period).mean().iloc[-1])
+
+
+def get_options_metrics(stock, current_price, hist):
+    """Fetch nearest-expiry options chain and compute IVR, skew, P/C ratio."""
+    try:
+        expirations = stock.options
+        if not expirations:
+            return None
+
+        today = datetime.now()
+        valid_exps = [e for e in expirations
+                      if datetime.strptime(e, '%Y-%m-%d') >= today + timedelta(days=7)]
+        if not valid_exps:
+            return None
+        nearest_exp = valid_exps[0]
+
+        chain = stock.option_chain(nearest_exp)
+        calls = chain.calls[chain.calls['impliedVolatility'] > 0.01].copy()
+        puts  = chain.puts[chain.puts['impliedVolatility']  > 0.01].copy()
+        if calls.empty or puts.empty:
+            return None
+
+        # ATM strike: closest to current price in the calls chain
+        atm_strike = float(calls['strike'].iloc[
+            (calls['strike'] - current_price).abs().argsort().iloc[0]
+        ])
+
+        atm_call = calls[calls['strike'] == atm_strike]
+        atm_put  = puts[puts['strike']  == atm_strike]
+        if atm_call.empty or atm_put.empty:
+            return None
+
+        atm_call_iv = float(atm_call['impliedVolatility'].values[0]) * 100
+        atm_put_iv  = float(atm_put['impliedVolatility'].values[0])  * 100
+        avg_atm_iv  = (atm_call_iv + atm_put_iv) / 2
+
+        skew = (atm_put_iv - atm_call_iv) / avg_atm_iv if avg_atm_iv > 0 else 0.0
+
+        put_vol  = float(puts['volume'].fillna(0).sum())
+        call_vol = float(calls['volume'].fillna(0).sum())
+        pc_ratio = put_vol / call_vol if call_vol > 0 else None
+
+        # IVR: compare current ATM IV to 1-year rolling 30-day realised vol range
+        log_ret    = np.log(hist['Close'] / hist['Close'].shift(1)).dropna()
+        rolling_rv = log_ret.rolling(30).std() * np.sqrt(252) * 100
+        rolling_rv = rolling_rv.dropna().tail(252)
+
+        ivr = None
+        if len(rolling_rv) >= 20:
+            rv_min, rv_max = float(rolling_rv.min()), float(rolling_rv.max())
+            if rv_max > rv_min:
+                ivr = max(0.0, min(100.0, (avg_atm_iv - rv_min) / (rv_max - rv_min) * 100))
+
+        ivr_label = ('Extreme — sell vol' if ivr is not None and ivr >= 80 else
+                     'High'               if ivr is not None and ivr >= 60 else
+                     'Normal'             if ivr is not None and ivr >= 35 else
+                     'Low'                if ivr is not None and ivr >= 20 else
+                     'Very Low — buy vol' if ivr is not None else 'N/A')
+
+        skew_label = ('Heavy put skew — downside fear' if skew >  0.20 else
+                      'Mild put skew'                  if skew >  0.05 else
+                      'Neutral'                        if abs(skew) <= 0.05 else
+                      'Call skew — bullish sentiment')
+
+        return {
+            'expiration':   nearest_exp,
+            'atm_strike':   atm_strike,
+            'atm_call_iv':  atm_call_iv,
+            'atm_put_iv':   atm_put_iv,
+            'avg_atm_iv':   avg_atm_iv,
+            'skew':         skew,
+            'skew_label':   skew_label,
+            'pc_ratio':     pc_ratio,
+            'ivr':          ivr,
+            'ivr_label':    ivr_label,
+        }
+    except Exception:
+        return None
 
 
 def fetch_stock_data(ticker: str, period="2y"):
@@ -186,6 +264,9 @@ def fetch_stock_data(ticker: str, period="2y"):
         # ESG / Quality
         'roic': roic,
         'f_score': f_score,
+
+        # Options metrics
+        'options': get_options_metrics(stock, current_price, hist),
 
         # Raw objects for deep access
         'info': info,
