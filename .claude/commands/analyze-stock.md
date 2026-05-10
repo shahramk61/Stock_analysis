@@ -1,10 +1,11 @@
 ---
-description: "Analyze one or more stocks using the weighted scoring model with risk management, peer comparison, and multi-horizon recommendations. Usage: /analyze-stock TICKER [TICKER2 TICKER3 ...]"
+description: Analyze one or more stocks with weighted scoring, risk management, peer comparison, and multi-horizon recommendations.
 allowed-tools: Read, Write, Bash, WebFetch, WebSearch, Skill
 ---
 
-Use the **stock-analysis** skill to analyze the following ticker(s): $ARGUMENTS
+Use the **stock-analysis** skill to analyze: $ARGUMENTS
 
-- If a single ticker is provided, run a full single-stock analysis.
-- If multiple tickers are provided (e.g. AAPL MSFT NVDA), run a multi-stock comparison: score each stock, build a ranking table, and identify the top pick.
-- If no ticker is provided, ask the user which stock(s) they want to analyze.
+Usage:
+- Single ticker (e.g. `/analyze-stock AAPL`) — full single-stock report
+- Multiple tickers (e.g. `/analyze-stock AAPL MSFT NVDA`) — side-by-side comparison with ranking and top pick
+- No argument — ask the user which stock to analyze
