@@ -1,5 +1,5 @@
 import pandas as pd
-from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength, get_market_regime, get_garch_forecast, get_momentum_and_52w_high, get_quality_accruals_gross_profit
+from signals import get_iv_rank_and_skew, calculate_altman_beneish, get_earnings_surprise, get_rolling_beta, calculate_piotroski_f_score, get_atr_volatility_clustering, get_relative_strength, get_market_regime, get_garch_forecast, get_momentum_and_52w_high, get_quality_accruals_gross_profit, get_amihud_illiquidity, get_share_turnover
 from dcf import calculate_dcf
 
 def calculate_pillars(data: dict, profile: str = "Balanced"):
@@ -19,6 +19,8 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     garch = get_garch_forecast(ticker)
     momentum = get_momentum_and_52w_high(ticker)
     quality = get_quality_accruals_gross_profit(ticker)
+    amihud = get_amihud_illiquidity(ticker)
+    turnover = get_share_turnover(ticker)
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
@@ -29,7 +31,10 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     # Quality boost (Novy-Marx Gross Profit + low accruals)
     quality_boost = (quality['gross_profitability'] * 0.3) + (10 if quality['high_quality'] else 0)
 
-    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2) + (piotroski * 2) + quality_boost))
+    # Liquidity boost: higher turnover good, lower illiquidity good
+    liquidity_boost = (turnover * 0.05) - (amihud * 5000)
+
+    fundamentals = min(95, max(30, (info.get('returnOnEquity', 0) * 50) + (info.get('revenueGrowth', 0) * 30) + (dcf_upside * 0.2) + (piotroski * 2) + quality_boost + liquidity_boost))
 
     # Momentum boost
     mom_boost = (momentum['momentum_6m'] * 0.15) + (momentum['momentum_12m'] * 0.1) + (8 if momentum['near_52w_high'] else 0)
@@ -72,6 +77,8 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "regime": regime,
             "garch": garch,
             "momentum": momentum,
-            "quality": quality
+            "quality": quality,
+            "amihud": amihud,
+            "turnover": turnover
         }
     }

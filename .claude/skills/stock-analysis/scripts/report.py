@@ -30,6 +30,8 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• 52w High Dist    : {signals['momentum']['dist_to_52w_high']}% {'(Near High ✓)' if signals['momentum']['near_52w_high'] else ''}")
     print(f"• Gross Profitab.  : {signals['quality']['gross_profitability']}%")
     print(f"• Accruals         : {signals['quality']['accruals']}% {'(Low ✓)' if signals['quality']['high_quality'] else ''}")
+    print(f"• Amihud Illiq     : {signals['amihud']}")
+    print(f"• Share Turnover   : {signals['turnover']}%")
     
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")
