@@ -71,10 +71,12 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
       f"FCF yield {pct(d.get('fcf_yield'))}; ROE {pct(d.get('roe'))} |")
     ve = p.get('vol_edge')
     ve_str = f"; Vol Edge {ve}/100" if ve is not None else ""
+    bd = d.get('beta_decomp', {})
+    alpha_str = f"; α={pct(bd.get('alpha_annual'))}/yr" if bd and bd.get('alpha_annual') is not None else ""
     a(f"| 📉 Technicals | {w['technicals']*100:.0f}% | {p['technicals']} | "
       f"RSI {fmt(d.get('rsi'))}; {'Above' if d['current_price'] > d.get('ma50',0) else 'Below'} 50MA ({dollar(d.get('ma50'))}); "
       f"{'Above' if d['current_price'] > d.get('ma200',0) else 'Below'} 200MA ({dollar(d.get('ma200'))}); "
-      f"MACD hist {fmt(d.get('macd_hist'))}; Vol {d.get('vol_trend','N/A')}{ve_str} |")
+      f"MACD hist {fmt(d.get('macd_hist'))}; Vol {d.get('vol_trend','N/A')}{ve_str}{alpha_str} |")
     _dcf = d.get('dcf', {})
     dcf_str = f"; DCF upside {pct(_dcf.get('upside_pct'))}" if _dcf.get('available') else ''
     a(f"| 💰 Valuation | {w['valuation']*100:.0f}% | {p['valuation']} | "
@@ -215,6 +217,51 @@ def generate_report(data, scores, mc_12m, mc_36m, profile, esg_enabled, risk_fla
             a(f"🔥 **{cb} consecutive beats** — strong execution momentum")
         elif cb == 0:
             a(f"⚠️ Most recent quarter was a miss")
+        a(f"")
+    a(f"---")
+    a(f"")
+    bd = d.get('beta_decomp', {})
+    if bd and bd.get('market_beta') is not None:
+        alpha       = bd.get('alpha_annual', 0)
+        market_beta = bd['market_beta']
+        sector_beta = bd.get('sector_beta')
+        r2          = bd.get('r_squared', 0)
+        idio_vol    = bd.get('idio_vol')
+        rb30        = bd.get('rolling_30d')
+        rb90        = bd.get('rolling_90d')
+        rb252       = bd.get('rolling_252d')
+        etf         = bd.get('sector_etf', 'N/A')
+
+        alpha_emoji = '🟢' if alpha > 5 else ('🟡' if alpha > 0 else '🔴')
+        beta_emoji  = '🟡' if market_beta > 1.5 else '🟢'
+
+        a(f"## 📐 Beta Decomposition (OLS, {bd.get('n_obs', '?')} trading days)")
+        a(f"")
+        a(f"| Component | Value | Interpretation |")
+        a(f"|---|---|---|")
+        a(f"| Market Beta (SPY) | {beta_emoji} **{market_beta:.3f}** | "
+          f"{'Amplifies' if market_beta > 1 else 'Dampens'} market moves by {abs(market_beta-1)*100:.0f}% |")
+        if sector_beta is not None:
+            sb_emoji = '🟡' if abs(sector_beta) > 0.5 else '🟢'
+            a(f"| Sector Beta ({etf}) | {sb_emoji} **{sector_beta:.3f}** | "
+              f"{'Significant' if abs(sector_beta) > 0.3 else 'Low'} sector-specific exposure |")
+        a(f"| Annualised Alpha | {alpha_emoji} **{alpha:+.2f}%/yr** | "
+          f"{'Outperforms' if alpha > 0 else 'Underperforms'} market+sector by {abs(alpha):.1f}%/yr |")
+        a(f"| R² | {fmt(r2*100, 1)}% | {r2*100:.0f}% of price moves explained by market+sector |")
+        if idio_vol is not None:
+            a(f"| Idiosyncratic Vol | {fmt(idio_vol)}%/yr | Stock-specific annualised risk |")
+        a(f"")
+
+        rolls = [x for x in [(30, rb30), (90, rb90), (252, rb252)] if x[1] is not None]
+        if rolls:
+            trend = ''
+            if len(rolls) >= 2 and rolls[0][1] > rolls[-1][1] * 1.1:
+                trend = ' ↑ Beta rising (recent sensitivity increasing)'
+            elif len(rolls) >= 2 and rolls[0][1] < rolls[-1][1] * 0.9:
+                trend = ' ↓ Beta falling (recent sensitivity decreasing)'
+            a(f"*Rolling Market Beta: " +
+              " | ".join(f"{w}d = {b:.3f}" for w, b in rolls) +
+              trend + "*")
         a(f"")
     a(f"---")
     a(f"")

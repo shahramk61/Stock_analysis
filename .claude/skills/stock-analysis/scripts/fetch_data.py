@@ -111,6 +111,118 @@ def get_options_metrics(stock, current_price, hist):
         return None
 
 
+SECTOR_ETFS = {
+    'Technology':              'XLK',
+    'Financial Services':      'XLF',
+    'Financials':              'XLF',
+    'Energy':                  'XLE',
+    'Healthcare':              'XLV',
+    'Health Care':             'XLV',
+    'Industrials':             'XLI',
+    'Consumer Cyclical':       'XLY',
+    'Consumer Discretionary':  'XLY',
+    'Consumer Defensive':      'XLP',
+    'Consumer Staples':        'XLP',
+    'Basic Materials':         'XLB',
+    'Materials':               'XLB',
+    'Communication Services':  'XLC',
+    'Real Estate':             'XLRE',
+    'Utilities':               'XLU',
+}
+
+
+def _ols(y, X):
+    """OLS regression: y ~ [1, X]. Returns (intercept, *coeffs, r_squared)."""
+    Xb = np.column_stack([np.ones(len(X)), X])
+    beta, _, _, _ = np.linalg.lstsq(Xb, y, rcond=None)
+    y_hat = Xb @ beta
+    ss_res = float(np.sum((y - y_hat) ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return beta, r2
+
+
+def _rolling_beta(stock_ret, market_ret, window):
+    """Simple rolling Cov/Var beta over a trailing window."""
+    if len(stock_ret) < window:
+        return None
+    s = stock_ret[-window:]
+    m = market_ret[-window:]
+    cov = float(np.cov(s, m)[0, 1])
+    var = float(np.var(m, ddof=1))
+    return round(cov / var, 3) if var > 0 else None
+
+
+def get_beta_decomposition(stock_hist, sector, period_days=504):
+    """
+    OLS decomposition: R_stock = α + β_market*R_SPY + β_sector*R_sector + ε
+    Returns market beta, sector beta, annualised alpha, R², idiosyncratic vol,
+    and rolling 30/90/252-day market betas.
+    """
+    try:
+        sector_etf = SECTOR_ETFS.get(sector, 'SPY')
+        tickers    = ['SPY'] if sector_etf == 'SPY' else ['SPY', sector_etf]
+
+        # Fetch benchmark data (2-year window)
+        bench = yf.download(tickers, period='2y', progress=False, auto_adjust=True)['Close']
+        if bench.empty:
+            return None
+
+        # Align indices (tz-naive)
+        sh = stock_hist['Close'].copy()
+        if sh.index.tzinfo is not None:
+            sh.index = sh.index.tz_localize(None)
+        if bench.index.tzinfo is not None:
+            bench.index = bench.index.tz_localize(None)
+
+        aligned = pd.concat([sh.rename('stock'), bench], axis=1).dropna()
+        if len(aligned) < 60:
+            return None
+
+        # Log returns
+        rets = np.log(aligned / aligned.shift(1)).dropna()
+        stock_r  = rets['stock'].values
+        spy_r    = rets['SPY'].values
+
+        if sector_etf == 'SPY' or sector_etf not in rets.columns:
+            # Single-factor model
+            beta_arr, r2 = _ols(stock_r, spy_r.reshape(-1, 1))
+            alpha_daily, market_beta, sector_beta = beta_arr[0], beta_arr[1], None
+        else:
+            sector_r = rets[sector_etf].values
+            X = np.column_stack([spy_r, sector_r])
+            beta_arr, r2 = _ols(stock_r, X)
+            alpha_daily, market_beta, sector_beta = beta_arr[0], beta_arr[1], beta_arr[2]
+
+        # Idiosyncratic (residual) volatility annualised
+        Xb = np.column_stack([np.ones(len(stock_r)), spy_r] +
+                             ([rets[sector_etf].values] if sector_etf != 'SPY' and sector_etf in rets.columns else []))
+        residuals = stock_r - Xb @ beta_arr
+        idio_vol = float(np.std(residuals, ddof=1) * np.sqrt(252) * 100)
+
+        # Rolling market betas
+        rb30  = _rolling_beta(stock_r, spy_r, 30)
+        rb90  = _rolling_beta(stock_r, spy_r, 90)
+        rb252 = _rolling_beta(stock_r, spy_r, 252)
+
+        alpha_annual = round(alpha_daily * 252 * 100, 2)   # annualised %
+
+        return {
+            'market_beta':    round(float(market_beta), 3),
+            'sector_beta':    round(float(sector_beta), 3) if sector_beta is not None else None,
+            'sector_etf':     sector_etf,
+            'alpha_annual':   alpha_annual,
+            'r_squared':      round(r2, 3),
+            'idio_vol':       round(idio_vol, 1),
+            'rolling_30d':    rb30,
+            'rolling_90d':    rb90,
+            'rolling_252d':   rb252,
+            'n_obs':          len(stock_r),
+        }
+    except Exception:
+        return None
+
+
 def _count_consecutive_beats(quarters):
     count = 0
     for q in quarters:
@@ -404,6 +516,9 @@ def fetch_stock_data(ticker: str, period="2y"):
 
         # Earnings history (surprise + post-earnings drift)
         'earnings_history': get_earnings_history(stock, hist),
+
+        # Beta decomposition (market / sector / idiosyncratic)
+        'beta_decomp': get_beta_decomposition(hist, info.get('sector', 'Unknown')),
 
         # Options metrics
         'options': get_options_metrics(stock, current_price, hist),

@@ -114,11 +114,16 @@ def score_technicals(d):
 
     base = round((rsi_score + ma_score + macd_score + vol_score + atr_score) / 5)
 
-    # Blend in volatility edge (20% weight) when options data is available
+    # Alpha signal from beta decomposition (±5 pt adjustment)
+    bd = d.get('beta_decomp', {})
+    alpha = bd.get('alpha_annual') if bd else None
+    alpha_adj = (5 if alpha is not None and alpha >  5 else
+                -5 if alpha is not None and alpha < -5 else 0)
+
+    # Blend: 80% base + 20% vol_edge, then apply alpha adjustment
     ve = score_volatility_edge(d.get('options'))
-    if ve is not None:
-        return round(0.80 * base + 0.20 * ve)
-    return base
+    blended = round(0.80 * base + 0.20 * ve) if ve is not None else base
+    return max(0, min(100, blended + alpha_adj))
 
 
 def score_valuation(d):
@@ -437,6 +442,15 @@ def check_risk_flags(data):
         flags.append(f'⚠️  High beta ({data["beta"]:.2f})')
     if (data.get('short_pct') or 0) > 20:
         flags.append(f'⚠️  Short interest > 20% ({data["short_pct"]:.1f}%)')
+
+    bd = data.get('beta_decomp', {})
+    if bd:
+        mb = bd.get('market_beta')
+        alpha = bd.get('alpha_annual')
+        if mb is not None and mb > 2.0:
+            flags.append(f'⚠️  Market beta {mb:.2f} — high market sensitivity')
+        if alpha is not None and alpha < -5:
+            flags.append(f'⚠️  Negative alpha {alpha:+.1f}%/yr — underperforming market+sector')
 
     eh = data.get('earnings_history', {})
     if eh:
