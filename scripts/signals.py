@@ -110,7 +110,7 @@ def get_monte_carlo_risk(ticker: str, paths: int = 10000, horizon_days: int = 25
     """
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="5y")
+        hist = stock.history(period="3y")
         if len(hist) < 100:
             return {"var_95": 20.0, "cvar_95": 28.0, "simulated_annual_vol": 35.0, "annual_drift": 8.0}
         
@@ -175,7 +175,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
     
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="5y")
+        hist = stock.history(period="3y")
         if len(hist) < 100:
             return {"predicted_next_return_pct": 0.5, "direction": "Neutral", "signal_strength": 5.0, "device": device, "note": "Insufficient data"}
         
@@ -412,7 +412,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
         }
 
 
-def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
+def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
     """
     SOTA neural time-series forecasting using NHITS (Neural Hierarchical Interpolation for Time Series)
     via NeuralForecast library — one of the top-performing DL models for forecasting (often beats N-BEATS, TFT, etc.).
@@ -431,7 +431,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
             torch.set_float32_matmul_precision('high')  # optional speedup on modern GPUs
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="5y")
+        hist = stock.history(period="3y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for NHITS forecasting"}
 
@@ -487,7 +487,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         return {"error": str(e)[:150]}
 
 
-def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
+def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
     """
     Temporal Fusion Transformer (TFT) via NeuralForecast — SOTA attention-based model for interpretable multi-horizon forecasting.
     Excellent at incorporating covariates and providing uncertainty via quantiles (we use point for consistency here).
@@ -506,7 +506,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="5y")
+        hist = stock.history(period="3y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for TFT forecasting"}
 
@@ -587,7 +587,7 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
     }
 
 
-def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
+def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
     """
     PatchTST (Patch Time Series Transformer) via NeuralForecast — one of the most powerful SOTA models for long-term time series forecasting (2024+ benchmarks often rank it top-tier).
     Uses patching mechanism for efficient transformer attention on time series patches. Excellent at capturing both local patterns and global dependencies. Complements NHITS (hierarchical) and TFT (attention with covariates) perfectly.
@@ -605,7 +605,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="5y")
+        hist = stock.history(period="3y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for PatchTST forecasting"}
 
@@ -649,6 +649,145 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
             "device_used": device,
             "epochs_trained": epochs,
             "note": "Trained on 3y history with PatchTST — top-tier long-horizon forecaster; GPU accelerated"
+        }
+
+    except ImportError:
+        return {"error": "neuralforecast not installed. Install with: pip install neuralforecast"}
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
+def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+    """
+    N-BEATS via NeuralForecast — classic interpretable SOTA model.
+    Excellent at decomposing forecasts into trend + seasonality + residual stacks.
+    Very strong baseline that often rivals newer transformers on financial data.
+    GPU-accelerated.
+    """
+    try:
+        import torch
+        import pandas as pd
+        import numpy as np
+        from neuralforecast import NeuralForecast
+        from neuralforecast.models import NBEATS
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            torch.set_float32_matmul_precision('high')
+
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="3y")
+        if len(hist) < 100:
+            return {"error": "Insufficient price history for N-BEATS forecasting"}
+
+        df = pd.DataFrame({
+            "unique_id": "stock",
+            "ds": hist.index.tz_localize(None),
+            "y": hist["Close"].values
+        })
+
+        model = NBEATS(
+            h=prediction_length,
+            input_size=input_size,
+            max_steps=epochs,
+            learning_rate=0.001,
+            loss="MAE",
+            valid_loss="MAE",
+            early_stop_patience_steps=10,
+            val_check_steps=5,
+            batch_size=32,
+            windows_batch_size=512,
+            random_seed=42,
+        )
+
+        nf = NeuralForecast(models=[model], freq="B")
+        nf.fit(df=df, val_size=0.1)
+
+        preds = nf.predict()
+        pred_median = preds["NBEATS"].values[0]
+
+        last_price = hist["Close"].iloc[-1]
+        pred_return = (pred_median - last_price) / last_price * 100
+
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+
+        return {
+            "predicted_5d_return_pct": round(pred_return, 2),
+            "direction": direction,
+            "model": "N-BEATS (NeuralForecast, interpretable)",
+            "device_used": device,
+            "epochs_trained": epochs,
+            "note": "Trained on 3y history with N-BEATS — strong interpretable baseline; GPU accelerated"
+        }
+
+    except ImportError:
+        return {"error": "neuralforecast not installed. Install with: pip install neuralforecast"}
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
+def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+    """
+    TCN (Temporal Convolutional Network) via NeuralForecast.
+    Extremely fast on GPU thanks to dilated causal convolutions.
+    Excellent at capturing long-range dependencies without recurrence.
+    Great complement to transformer-based models.
+    """
+    try:
+        import torch
+        import pandas as pd
+        import numpy as np
+        from neuralforecast import NeuralForecast
+        from neuralforecast.models import TCN
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            torch.set_float32_matmul_precision('high')
+
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="3y")
+        if len(hist) < 100:
+            return {"error": "Insufficient price history for TCN forecasting"}
+
+        df = pd.DataFrame({
+            "unique_id": "stock",
+            "ds": hist.index.tz_localize(None),
+            "y": hist["Close"].values
+        })
+
+        model = TCN(
+            h=prediction_length,
+            input_size=input_size,
+            max_steps=epochs,
+            learning_rate=0.001,
+            hidden_size=128,
+            loss="MAE",
+            valid_loss="MAE",
+            early_stop_patience_steps=10,
+            val_check_steps=5,
+            batch_size=32,
+            windows_batch_size=512,
+            random_seed=42,
+        )
+
+        nf = NeuralForecast(models=[model], freq="B")
+        nf.fit(df=df, val_size=0.1)
+
+        preds = nf.predict()
+        pred_median = preds["TCN"].values[0]
+
+        last_price = hist["Close"].iloc[-1]
+        pred_return = (pred_median - last_price) / last_price * 100
+
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+
+        return {
+            "predicted_5d_return_pct": round(pred_return, 2),
+            "direction": direction,
+            "model": "TCN (NeuralForecast, fast dilated conv)",
+            "device_used": device,
+            "epochs_trained": epochs,
+            "note": "Trained on 3y history with TCN — very fast & effective on GPU"
         }
 
     except ImportError:
