@@ -226,7 +226,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
         with torch.no_grad():
             pred_return = model(last_seq).item()
         
-        direction = "Bullish 📈" if pred_return > 0.005 else "Bearish 📉" if pred_return < -0.005 else "Neutral ➡"
+        direction = "Bullish 📈" if pred_return > 0.005 else "Bearish 📉" if pred_return < -0.005 else "Neutral ➕"
         strength = min(abs(pred_return) * 200, 100)  # scale to 0-100
         
         return {
@@ -282,7 +282,7 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5):
         pred_median = q50[-1]
         pred_return = (pred_median - last_price) / last_price * 100
         
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➡"
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
         
         uncertainty = (q90[-1] - q10[-1]) / last_price * 100
         
@@ -347,7 +347,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
             reverse=True
         )[:max_news]
 
-        titles = [item.get("title", "").strip() for item in recent_news if item.get("title")]
+        titles = [item.get("title", "").strip() for n in recent_news if item.get("title") and len(n.get("title","")) > 5]
         titles = [t for t in titles if len(t) > 5]  # filter very short
 
         if not titles:
@@ -470,7 +470,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         pred_return = (pred_median - last_price) / last_price * 100
 
         # For simplicity, use point forecast; could add quantiles but NHITS default is point
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➡"
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -541,7 +541,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➡"
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -558,42 +558,33 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         return {"error": str(e)[:150]}
 
 
-def get_nhits_tft_ensemble(ticker: str, prediction_length: int = 5):
+def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
     """
-    Ensemble of NHITS + TFT via NeuralForecast for robust SOTA forecasting.
-    Combines strengths: NHITS for hierarchical/multi-scale patterns, TFT for attention-based long-range dependencies and interpretability.
-    Ensemble prediction = average of medians. Uncertainty = disagreement between models (range/2) as proxy for model uncertainty.
-    (For full probabilistic uncertainty, models can be configured with QuantileLoss/MQLoss in future iterations.)
-    GPU-accelerated. Recommended as primary forecast signal.
+    NHITS + TFT + PatchTST ensemble forecast (all 3 SOTA models via NeuralForecast).
+    Uses GPU for training. Ensemble prediction = average of the three 5-day returns.
+    Uncertainty = range/2 (max disagreement between models).
     """
-    try:
-        nhits_res = get_nhits_forecast(ticker, prediction_length=prediction_length)
-        tft_res = get_tft_forecast(ticker, prediction_length=prediction_length)
-
-        if "error" in nhits_res or "error" in tft_res:
-            return {"error": f"Ensemble failed: NHITS={nhits_res.get('error', 'ok')}, TFT={tft_res.get('error', 'ok')}"}
-
-        nhits_pred = nhits_res["predicted_5d_return_pct"]
-        tft_pred = tft_res["predicted_5d_return_pct"]
-
-        ensemble_pred = (nhits_pred + tft_pred) / 2.0
-        uncertainty = abs(nhits_pred - tft_pred) / 2.0  # model disagreement as uncertainty proxy
-
-        direction = "Bullish 📈" if ensemble_pred > 1.0 else "Bearish 📉" if ensemble_pred < -1.0 else "Neutral ➡"
-
-        return {
-            "predicted_5d_return_pct": round(ensemble_pred, 2),
-            "direction": direction,
-            "uncertainty_pct": round(uncertainty, 2),
-            "nhits_pred": nhits_pred,
-            "tft_pred": tft_pred,
-            "model": "NHITS + TFT Ensemble (NeuralForecast)",
-            "device_used": nhits_res.get("device_used", "cpu"),
-            "note": "Ensemble of NHITS (hierarchical) + TFT (attention) — robust with uncertainty from model disagreement; GPU accelerated"
-        }
-
-    except Exception as e:
-        return {"error": str(e)[:150]}
+    results = {}
+    preds = []
+    for name, fn in [("nhits", get_nhits_forecast), ("tft", get_tft_forecast), ("patchtst", get_patchtst_forecast)]:
+        r = fn(ticker, prediction_length=prediction_length)
+        results[name] = r
+        if "predicted_5d_return_pct" in r:
+            preds.append(r["predicted_5d_return_pct"])
+    if not preds:
+        return {"error": "All ensemble models failed", "direction": "Neutral"}
+    ensemble = round(sum(preds) / len(preds), 2)
+    uncertainty = round((max(preds) - min(preds)) / 2, 2)
+    direction = "Bullish 📈" if ensemble > 1 else ("Bearish 📉" if ensemble < -1 else "Neutral ➕")
+    return {
+        "predicted_5d_return_pct": ensemble,
+        "direction": direction,
+        "uncertainty_pct": uncertainty,
+        "components": results,
+        "models_used": len(preds),
+        "device_used": results.get("nhits", {}).get("device_used", "cpu"),
+        "model": "NHITS + TFT + PatchTST Ensemble"
+    }
 
 
 def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
@@ -649,7 +640,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➡"
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
