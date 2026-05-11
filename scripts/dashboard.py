@@ -398,10 +398,10 @@ if st.session_state.get('ready'):
                         ),
                     ))
 
-                # "Today" vertical marker
-                fig_daily.add_vline(x=today_str, line_dash="solid", line_color="#facc15",
-                                    opacity=0.8, annotation_text="Today",
-                                    annotation_position="top left",
+                # "Today" vertical marker (category axis uses numeric index)
+                fig_daily.add_vline(x=0, line_dash="solid", line_color="#facc15",
+                                    opacity=0.8, annotation_text="◀ Today",
+                                    annotation_position="top right",
                                     annotation_font_color="#facc15")
                 if use_price:
                     fig_daily.add_hline(y=last_px, line_dash="dash", line_color="gray",
