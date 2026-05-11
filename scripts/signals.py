@@ -218,11 +218,24 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5):
         if len(hist) < 50: return {"error": "Insufficient data"}
         context = hist['Close'].dropna().values[-100:].tolist()
         last_price = context[-1]
-        forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
-        q10, q50, q90 = forecast[0].cpu().numpy(), forecast[1].cpu().numpy(), forecast[2].cpu().numpy()
-        pred_return = (q50[-1] - last_price) / last_price * 100
+        # Try quantile_levels API; fall back to manual percentile sampling
+        try:
+            forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
+            q10_v = float(forecast[0].cpu().numpy()[-1])
+            q50_v = float(forecast[1].cpu().numpy()[-1])
+            q90_v = float(forecast[2].cpu().numpy()[-1])
+        except (TypeError, Exception):
+            import torch as _t
+            ctx_t = _t.tensor(context, dtype=_t.float32).unsqueeze(0).unsqueeze(0)
+            samples = pipeline.predict(ctx_t, prediction_length=prediction_length)
+            s = samples[0].squeeze(0).cpu().numpy()
+            import numpy as _np2
+            q10_v = float(_np2.percentile(s[:, -1], 10))
+            q50_v = float(_np2.percentile(s[:, -1], 50))
+            q90_v = float(_np2.percentile(s[:, -1], 90))
+        pred_return = (q50_v - last_price) / last_price * 100
         direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
-        return {"predicted_return_pct": round(pred_return, 2), "direction": direction, "prediction_length": prediction_length, "uncertainty_range_pct": round((q90[-1] - q10[-1]) / last_price * 100, 1), "model": "Chronos-2", "device_used": device_map}
+        return {"predicted_return_pct": round(pred_return, 2), "direction": direction, "prediction_length": prediction_length, "uncertainty_range_pct": round((q90_v - q10_v) / last_price * 100, 1), "lower_10pct": round((q10_v - last_price) / last_price * 100, 2), "upper_90pct": round((q90_v - last_price) / last_price * 100, 2), "model": "Chronos-2", "device_used": device_map}
     except Exception as e: return {"error": str(e)[:150]}
 
 def get_finbert_sentiment(ticker: str, max_news: int = 10):
@@ -348,6 +361,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import NHITS
+        from neuralforecast.losses.pytorch import MAE
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
@@ -371,14 +385,11 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
             input_size=input_size,
             max_steps=epochs,
             learning_rate=0.001,
-            num_layers=3,
-            hidden_size=128,
             loss=MAE(),
             valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
-            windows_batch_size=512,
             random_seed=42,
         )
 
@@ -424,6 +435,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import TFT
+        from neuralforecast.losses.pytorch import MAE
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
@@ -524,6 +536,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import PatchTST
+        from neuralforecast.losses.pytorch import MAE
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
@@ -667,6 +680,7 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import TCN
+        from neuralforecast.losses.pytorch import MAE
         from neuralforecast.losses.pytorch import MAE as NFLoss
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
