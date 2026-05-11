@@ -76,7 +76,7 @@ def generate_report(data, scores, mc_result, profile):
         print(f"\n{'Horizon':<7} {'Median%':<9} {'Avg%':<8} {'Direction':<14} {'±Uncert':<9} " +
               "  ".join(f"{m:<9}" for m in model_names))
         print("-" * W)
-        for h in ["5d", "10d", "15d", "20d"]:
+        for h in ["5d", "10d", "15d", "20d", "50d"]:
             hd = multi["horizons"].get(h, {})
             if "error" in hd:
                 print(f"{h:<7} {'ERROR'}")
@@ -93,7 +93,7 @@ def generate_report(data, scores, mc_result, profile):
         print(f"Trend: {multi.get('trend_signal','N/A')}  |  Consensus: {multi.get('consensus_direction','N/A')}")
 
         # Day-by-day breakdown per horizon
-        for h in ["5d", "10d", "15d", "20d"]:
+        for h in ["5d", "10d", "15d", "20d", "50d"]:
             hd = multi["horizons"].get(h, {})
             if "error" in hd:
                 continue

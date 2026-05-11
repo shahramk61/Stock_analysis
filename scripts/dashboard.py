@@ -344,7 +344,7 @@ if st.session_state.get('ready'):
 
         if "error" not in multi and "horizons" in multi:
             horizons = multi["horizons"]
-            valid_hs = [h for h in ["5d", "10d", "15d", "20d"] if h in horizons and "error" not in horizons[h]]
+            valid_hs = [h for h in ["5d", "10d", "15d", "20d", "50d"] if h in horizons and "error" not in horizons[h]]
 
             # ── Horizon selector
             sel_h = st.radio("Select horizon for daily chart:", valid_hs, horizontal=True)
@@ -502,7 +502,7 @@ if st.session_state.get('ready'):
             # ── Horizon summary table (all 4 horizons)
             st.markdown("**Horizon Summary — Final-Day Returns**")
             table_rows = []
-            for h in ["5d", "10d", "15d", "20d"]:
+            for h in ["5d", "10d", "15d", "20d", "50d"]:
                 if h not in horizons or "error" in horizons[h]:
                     continue
                 h_data  = horizons[h]

@@ -370,7 +370,7 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
 
 def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
     if horizons is None:
-        horizons = [5, 10, 15, 20]
+        horizons = [5, 10, 15, 20, 50]
     if not _NF_AVAILABLE:
         return {"error": "neuralforecast not installed", "horizons": {}}
     device = _gpu_device()
