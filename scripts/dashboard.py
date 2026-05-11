@@ -60,7 +60,7 @@ def run_analysis(ticker, profile, use_gpu):
         import signals as sm
         sm.get_lstm_forecast     = lambda t, **k: {"direction": "Disabled", "predicted_return_pct": 0, "signal_strength": 0, "device_used": "disabled"}
         sm.get_finbert_sentiment = lambda t, **k: {"overall_sentiment": "Disabled", "sentiment_score": 50, "num_articles": 0}
-        sm.get_nhits_tft_patchtst_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_5d_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
+        sm.get_nhits_tft_patchtst_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
     scores = calculate_pillars(data, profile)
     mc12 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=252)
     mc36 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=756)
@@ -244,8 +244,8 @@ if run_btn:
                 st.warning(lstm.get('error','?'))
         with c2:
             st.markdown("**Chronos-2 (zero-shot, 5-day)**")
-            if 'error' not in chronos and 'predicted_5d_return_pct' in chronos:
-                p_c = chronos.get('predicted_5d_return_pct', 0)
+            if 'error' not in chronos and 'predicted_return_pct' in chronos:
+                p_c = chronos.get('predicted_return_pct', 0)
                 d_c = chronos.get('direction', 'N/A')
                 e_c = "🟢" if d_c=="Bullish" else ("🔴" if d_c=="Bearish" else "🟡")
                 st.metric("5-Day Forecast",  f"{p_c:+.2f}%")
@@ -279,8 +279,8 @@ if run_btn:
                 st.info("No news available via yfinance.")
         with c4:
             st.markdown("**DL Ensemble (5-day)**")
-            if 'error' not in dl and 'predicted_5d_return_pct' in dl:
-                p_  = dl.get('predicted_5d_return_pct',0)
+            if 'error' not in dl and 'predicted_return_pct' in dl:
+                p_  = dl.get('predicted_return_pct',0)
                 d_  = dl.get('direction','N/A')
                 e   = "🟢" if d_=="Bullish" else ("🔴" if d_=="Bearish" else "🟡")
                 st.metric("5-Day Forecast",  f"{p_:+.2f}%")
@@ -294,8 +294,8 @@ if run_btn:
                     model_names = {"nhits": "NHITS", "tft": "TFT", "patchtst": "PatchTST", "nbeats": "N-BEATS", "tcn": "TCN"}
                     for nm, label in model_names.items():
                         r = comps.get(nm, {})
-                        if 'predicted_5d_return_pct' in r:
-                            pred_val = r['predicted_5d_return_pct']
+                        if 'predicted_return_pct' in r:
+                            pred_val = r['predicted_return_pct']
                             em = "📈" if pred_val > 1 else ("📉" if pred_val < -1 else "➡")
                             st.write(f"  {em} **{label}**: `{pred_val:+.2f}%`")
                         elif 'error' in r:
