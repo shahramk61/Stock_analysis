@@ -91,25 +91,32 @@ def generate_report(data, scores, mc_result, profile):
             hd = multi["horizons"].get(h, {})
             if "error" in hd:
                 continue
-            daily  = hd.get("daily_forecasts", [])
-            pm_d   = hd.get("per_model_daily", {})
+            daily       = hd.get("daily_forecasts", [])
+            daily_px    = hd.get("daily_prices", [])
+            pm_d        = hd.get("per_model_daily", {})
+            dates       = hd.get("forecast_dates", [])
+            last_px     = hd.get("last_price", price)
             if not daily:
                 continue
 
             print(f"\n{h} Horizon → Median: {hd.get('median_return_pct',0):+.2f}% | "
-                  f"Consensus: {hd.get('direction','N/A')}")
-            hdr = f"  {'Day':>4} | {'Median%':>8} | " + " | ".join(f"{m:>8}" for m in model_names)
-            print(f"  {'-'*len(hdr)}")
+                  f"Consensus: {hd.get('direction','N/A')} | Current: ${last_px:.2f}")
+            hdr = (f"  {'Day':>4} | {'Date':<12} | {'Price$':>8} | {'Cumul%':>8} | " +
+                   " | ".join(f"{m:>8}" for m in model_names))
+            sep = f"  {'-'*len(hdr)}"
+            print(sep)
             print(hdr)
-            print(f"  {'-'*len(hdr)}")
+            print(sep)
             for i, med in enumerate(daily):
-                day_num = i + 1
-                is_last = (day_num == len(daily))
-                per_m   = "  ".join(
+                day_num  = i + 1
+                is_last  = (day_num == len(daily))
+                date_str = dates[i] if i < len(dates) else ""
+                px_str   = f"${daily_px[i]:.2f}" if i < len(daily_px) else "N/A"
+                per_m    = "  ".join(
                     f"{pm_d[m][i]:>+7.2f}%" if m in pm_d and i < len(pm_d[m]) else f"{'N/A':>8}"
                     for m in model_names
                 )
-                # For 10d/15d/20d only print first 5 days and last day to keep output compact
+                # For longer horizons print first 5 days + last day only
                 if len(daily) > 5 and not (day_num <= 5 or is_last):
                     if day_num == 6:
                         print(f"  {'...':>5}")
@@ -119,8 +126,8 @@ def generate_report(data, scores, mc_result, profile):
                     tcn_last = pm_d.get("TCN", [0])[-1] if "TCN" in pm_d else 0
                     if abs(tcn_last) > 3.0:
                         outlier_flag = "  ⚠️ TCN outlier"
-                print(f"  {day_num:>4} | {med:>+7.3f}% | {per_m}{outlier_flag}")
-            print(f"  {'-'*len(hdr)}")
+                print(f"  {day_num:>4} | {date_str:<12} | {px_str:>8} | {med:>+7.3f}% | {per_m}{outlier_flag}")
+            print(sep)
     else:
         print(f"\n📅 Multi-Horizon Forecasts: {multi.get('error', 'Not available')}")
     

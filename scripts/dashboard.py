@@ -341,52 +341,83 @@ if st.session_state.get('ready'):
             sel_h = st.radio("Select horizon for daily chart:", valid_hs, horizontal=True)
 
             if sel_h and sel_h in horizons:
-                hd      = horizons[sel_h]
-                daily   = hd.get("daily_forecasts", [])
-                pm_d    = hd.get("per_model_daily", {})
-                days    = list(range(1, len(daily) + 1))
+                hd       = horizons[sel_h]
+                daily    = hd.get("daily_forecasts", [])
+                daily_px = hd.get("daily_prices", [])
+                pm_d     = hd.get("per_model_daily", {})
+                pm_px    = hd.get("per_model_daily_prices", {})
+                dates    = hd.get("forecast_dates", [])
+                last_px  = hd.get("last_price", price)
+                x_vals   = dates if dates else list(range(1, len(daily) + 1))
+
+                # ── View toggle
+                view      = st.radio("Y-axis:", ["% Cumulative Return", "Projected Price ($)"],
+                                     horizontal=True, key="yaxis_toggle")
+                use_price = (view == "Projected Price ($)")
 
                 # ── Daily time-series chart
                 fig_daily = go.Figure()
-                # Per-model lines
                 for m in MODEL_NAMES:
-                    if m in pm_d and pm_d[m]:
+                    y_m = (pm_px.get(m) or pm_d.get(m)) if use_price else pm_d.get(m)
+                    if not use_price:
+                        y_m = pm_d.get(m)
+                    if y_m:
                         fig_daily.add_trace(go.Scatter(
-                            x=list(range(1, len(pm_d[m]) + 1)),
-                            y=pm_d[m],
-                            mode="lines",
-                            name=m,
+                            x=x_vals[:len(y_m)], y=y_m,
+                            mode="lines", name=m,
                             line=dict(color=MODEL_COLORS[m], width=1.5, dash="dot"),
-                            opacity=0.7,
+                            opacity=0.75,
+                            hovertemplate=(
+                                f"<b>{m}</b><br>%{{x}}<br>"
+                                + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
+                                + "<extra></extra>"
+                            ),
                         ))
-                # Ensemble median — bold
-                if daily:
+                y_med = daily_px if use_price else daily
+                if y_med:
                     fig_daily.add_trace(go.Scatter(
-                        x=days, y=daily,
+                        x=x_vals[:len(y_med)], y=y_med,
                         mode="lines+markers", name="Ensemble Median",
-                        line=dict(color="#ffffff", width=3),
-                        marker=dict(size=6),
+                        line=dict(color="#ffffff", width=3), marker=dict(size=5),
+                        hovertemplate=(
+                            "<b>Ensemble Median</b><br>%{x}<br>"
+                            + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
+                            + "<extra></extra>"
+                        ),
                     ))
-                fig_daily.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                if use_price:
+                    fig_daily.add_hline(y=last_px, line_dash="dash", line_color="gray",
+                                        opacity=0.6, annotation_text=f"Today ${last_px:.2f}")
+                else:
+                    fig_daily.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
                 fig_daily.update_layout(
-                    title=f"Daily Cumulative Return Forecast — {sel_h} Horizon",
-                    xaxis_title="Day",
-                    yaxis_title="Cumulative Return %",
-                    template="plotly_dark", height=420,
+                    title=f"{'Projected Price' if use_price else 'Cumulative Return'} — {sel_h} Horizon",
+                    xaxis=dict(title="Date", type="category", tickangle=-35),
+                    yaxis_title="Price ($)" if use_price else "Cumulative Return %",
+                    template="plotly_dark", height=460, hovermode="x unified",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 )
                 st.plotly_chart(fig_daily, use_container_width=True)
 
-                # ── Day-by-day data table for selected horizon
-                if daily and pm_d:
+                # ── Day-by-day data table
+                if daily:
                     tbl_rows = []
                     for i, med in enumerate(daily):
-                        row = {"Day": i + 1, "Ensemble Median %": f"{med:+.3f}%"}
+                        px_v = daily_px[i] if i < len(daily_px) else None
+                        row  = {
+                            "Day":      i + 1,
+                            "Date":     dates[i] if i < len(dates) else "",
+                            "Price $":  f"${px_v:.2f}" if px_v else "N/A",
+                            "Median %": f"{med:+.3f}%",
+                        }
                         for m in MODEL_NAMES:
                             v = pm_d[m][i] if m in pm_d and i < len(pm_d[m]) else None
-                            row[m] = f"{v:+.3f}%" if v is not None else "N/A"
+                            p = pm_px[m][i] if m in pm_px and i < len(pm_px[m]) else None
+                            row[m]         = f"{v:+.3f}%" if v is not None else "N/A"
+                            row[f"{m} $"]  = f"${p:.2f}" if p is not None else "N/A"
                         tbl_rows.append(row)
-                    with st.expander(f"📋 Day-by-day data table ({sel_h})", expanded=False):
+                    with st.expander(f"📋 Day-by-day table ({sel_h})", expanded=False):
                         st.dataframe(pd.DataFrame(tbl_rows), use_container_width=True, hide_index=True)
 
             st.divider()
