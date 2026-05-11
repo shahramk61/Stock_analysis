@@ -36,6 +36,11 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• Formulaic Alpha  : {signals['formulaic_alpha']['alpha']} ({signals['formulaic_alpha']['alpha_signal']})")
     print(f"• OBV (20d chg)    : {signals['obv']['obv_change_20d_pct']}%")
     print(f"• Chaikin MF       : {signals['cmf']['cmf']} ({signals['cmf']['cmf_signal']})")
+    mc_risk = signals.get('mc_risk', {})
+    if mc_risk:
+        rl = mc_risk.get('risk_level', 'N/A')
+        re = '🔴' if rl == 'High' else ('🟡' if rl == 'Medium' else '🟢')
+        print(f"• MC VaR 95%       : {mc_risk.get('var_95', 0):.1f}% | CVaR 95%: {mc_risk.get('cvar_95', 0):.1f}% | Risk: {re} {rl} | Vol: {mc_risk.get('simulated_annual_vol', 0):.1f}% | Drift: {mc_risk.get('annual_drift', 0):+.1f}%")
 
     # GPU / DL signals
     lstm = signals.get('lstm', {})

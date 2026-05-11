@@ -354,6 +354,17 @@ if run_btn:
             st.metric("Vol Ratio",         f"{sig['garch']['vol_ratio']:.2f}",
                 delta="Calm" if sig['garch']['vol_ratio']<1 else "Elevated",
                 delta_color="normal" if sig['garch']['vol_ratio']<1 else "inverse")
+            st.divider()
+            st.markdown("**📉 Monte Carlo Risk (VaR / CVaR)**")
+            mcr = sig.get('mc_risk', {})
+            if mcr:
+                rl = mcr.get('risk_level', 'N/A')
+                re = "🔴" if rl=="High" else ("🟡" if rl=="Medium" else "🟢")
+                st.metric("VaR 95% (1yr)",   f"{mcr.get('var_95',0):.1f}%",
+                    delta=f"{re} {rl} risk", delta_color="inverse" if rl=="High" else "normal")
+                st.metric("CVaR 95% (1yr)",  f"{mcr.get('cvar_95',0):.1f}%")
+                st.metric("Simulated Vol",   f"{mcr.get('simulated_annual_vol',0):.1f}%")
+                st.metric("Annual Drift",    f"{mcr.get('annual_drift',0):+.1f}%")
 
     # TAB 6 — Earnings
     with tabs[6]:
