@@ -58,7 +58,7 @@ def run_analysis(ticker, profile, use_gpu):
     data['dcf'] = calculate_dcf(data)
     if not use_gpu:
         import signals as sm
-        sm.get_lstm_forecast     = lambda t, **k: {"direction": "Disabled", "predicted_next_return_pct": 0, "signal_strength": 0, "device_used": "disabled"}
+        sm.get_lstm_forecast     = lambda t, **k: {"direction": "Disabled", "predicted_return_pct": 0, "signal_strength": 0, "device_used": "disabled"}
         sm.get_finbert_sentiment = lambda t, **k: {"overall_sentiment": "Disabled", "sentiment_score": 50, "num_articles": 0}
         sm.get_nhits_tft_patchtst_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_5d_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
     scores = calculate_pillars(data, profile)
@@ -233,7 +233,7 @@ if run_btn:
         with c1:
             st.markdown("**LSTM (next-day)**")
             if 'error' not in lstm:
-                pred = lstm.get('predicted_next_return_pct',0)
+                pred = lstm.get('predicted_return_pct',0)
                 d_  = lstm.get('direction','N/A')
                 e   = "🟢" if d_=="Bullish" else ("🔴" if d_=="Bearish" else "🟡")
                 st.metric("Predicted Return",  f"{pred:+.2f}%")
@@ -251,6 +251,7 @@ if run_btn:
                 st.metric("5-Day Forecast",  f"{p_c:+.2f}%")
                 st.metric("Direction",       f"{e_c} {d_c}")
                 st.metric("10th–90th range", f"{chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}%")
+                st.metric("Uncertainty",     f"±{chronos.get('uncertainty_range_pct',0):.1f}%")
                 st.metric("Uncertainty",     f"±{chronos.get('uncertainty_pct',0):.2f}%")
                 st.caption(f"Device: `{chronos.get('device_used','?')}` | {chronos.get('model','Chronos-2')}")
             else:

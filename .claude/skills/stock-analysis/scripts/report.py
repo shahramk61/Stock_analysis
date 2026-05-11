@@ -49,11 +49,12 @@ def generate_report(data, scores, mc_result, profile):
     chronos = signals.get('chronos', {})
     print(f"\n🖥️  GPU / Deep Learning Signals:")
     if 'error' not in lstm:
-        print(f"• LSTM Forecast    : {lstm.get('predicted_next_return_pct', 0):+.2f}% next day → {lstm.get('direction','N/A')} (strength: {lstm.get('signal_strength',0):.0f}/100, device: {lstm.get('device_used','?')})")
+        preds_str = f" | steps: {lstm['all_predictions']}" if lstm.get('all_predictions') else ""
+        print(f"• LSTM Forecast    : {lstm.get('predicted_return_pct', 0):+.2f}% ({lstm.get('prediction_length',1)}d) → {lstm.get('direction','N/A')} (strength: {lstm.get('signal_strength',0):.0f}/100, device: {lstm.get('device_used','?')}){preds_str}")
     else:
         print(f"• LSTM Forecast    : unavailable ({lstm.get('error','?')})")
     if 'error' not in chronos and 'predicted_5d_return_pct' in chronos:
-        print(f"• Chronos-2 Fcst   : {chronos.get('predicted_5d_return_pct',0):+.2f}% (5d) → {chronos.get('direction','N/A')} | range: {chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}% | device: {chronos.get('device_used','?')}")
+        print(f"• Chronos-2 Fcst   : {chronos.get('predicted_return_pct',0):+.2f}% ({chronos.get('prediction_length',5)}d) → {chronos.get('direction','N/A')} | range: {chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}% | ±{chronos.get('uncertainty_range_pct',0):.1f}% | device: {chronos.get('device_used','?')}")
     else:
         print(f"• Chronos-2 Fcst   : unavailable ({chronos.get('error','not installed')})")
     if 'error' not in finbert:
