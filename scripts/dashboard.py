@@ -320,63 +320,93 @@ if run_btn:
         c2.metric("Stop-loss level (−15%)", f"${mc12['stop_price']:.2f}")
         st.caption(f"σ={data.get('annual_vol',0):.1f}% ann. · μ={mc12['drift']*100:.1f}% (score-derived) · 10,000 paths")
 
-    # TAB 5 — Multi-Horizon (dedicated tab)
+    # TAB 5 — Multi-Horizon (v4.11 — daily time-series)
     with tabs[5]:
-        st.subheader("📅 Multi-Horizon Forecast (5d / 10d / 15d / 20d) — Ensemble of 5 SOTA Models")
+        st.subheader("📅 Multi-Horizon Daily Forecasts — 5 SOTA Models (NHITS · TFT · PatchTST · N-BEATS · TCN)")
         multi = sig.get('multi_horizon_forecasts', sig.get('multi_h', {}))
+        MODEL_NAMES = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+        MODEL_COLORS = {"NHITS": "#3b82f6", "TFT": "#f59e0b", "PatchTST": "#22c55e",
+                        "NBEATS": "#a855f7", "TCN": "#ef4444"}
 
         if "error" not in multi and "horizons" in multi:
             horizons = multi["horizons"]
+            valid_hs = [h for h in ["5d", "10d", "15d", "20d"] if h in horizons and "error" not in horizons[h]]
 
-            df_chart = pd.DataFrame([
-                {
-                    "Horizon": h,
-                    "Median Return %": horizons[h].get("median_return_pct", horizons[h].get("predicted_return_pct", 0)),
-                    "Avg Return %":    horizons[h].get("avg_return_pct", horizons[h].get("predicted_return_pct", 0)),
-                    "Uncertainty ±%":  horizons[h].get("model_disagreement", 0),
-                }
-                for h in ["5d", "10d", "15d", "20d"] if h in horizons and "error" not in horizons[h]
-            ])
+            # ── Horizon selector
+            sel_h = st.radio("Select horizon for daily chart:", valid_hs, horizontal=True)
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df_chart["Horizon"], y=df_chart["Median Return %"],
-                mode="lines+markers", name="Median",
-                line=dict(color="#3b82f6", width=4)))
-            fig.add_trace(go.Scatter(
-                x=df_chart["Horizon"], y=df_chart["Avg Return %"],
-                mode="lines+markers", name="Average",
-                line=dict(color="#f59e0b", dash="dash")))
-            fig.add_hline(y=0, line_dash="dash", line_color="gray")
-            fig.update_layout(
-                title="Predicted Return by Horizon",
-                xaxis_title="Forecast Horizon",
-                yaxis_title="Return %",
-                template="plotly_dark", height=420)
-            st.plotly_chart(fig, use_container_width=True)
+            if sel_h and sel_h in horizons:
+                hd      = horizons[sel_h]
+                daily   = hd.get("daily_forecasts", [])
+                pm_d    = hd.get("per_model_daily", {})
+                days    = list(range(1, len(daily) + 1))
 
-            # Per-model breakdown table
-            model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+                # ── Daily time-series chart
+                fig_daily = go.Figure()
+                # Per-model lines
+                for m in MODEL_NAMES:
+                    if m in pm_d and pm_d[m]:
+                        fig_daily.add_trace(go.Scatter(
+                            x=list(range(1, len(pm_d[m]) + 1)),
+                            y=pm_d[m],
+                            mode="lines",
+                            name=m,
+                            line=dict(color=MODEL_COLORS[m], width=1.5, dash="dot"),
+                            opacity=0.7,
+                        ))
+                # Ensemble median — bold
+                if daily:
+                    fig_daily.add_trace(go.Scatter(
+                        x=days, y=daily,
+                        mode="lines+markers", name="Ensemble Median",
+                        line=dict(color="#ffffff", width=3),
+                        marker=dict(size=6),
+                    ))
+                fig_daily.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                fig_daily.update_layout(
+                    title=f"Daily Cumulative Return Forecast — {sel_h} Horizon",
+                    xaxis_title="Day",
+                    yaxis_title="Cumulative Return %",
+                    template="plotly_dark", height=420,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                )
+                st.plotly_chart(fig_daily, use_container_width=True)
+
+                # ── Day-by-day data table for selected horizon
+                if daily and pm_d:
+                    tbl_rows = []
+                    for i, med in enumerate(daily):
+                        row = {"Day": i + 1, "Ensemble Median %": f"{med:+.3f}%"}
+                        for m in MODEL_NAMES:
+                            v = pm_d[m][i] if m in pm_d and i < len(pm_d[m]) else None
+                            row[m] = f"{v:+.3f}%" if v is not None else "N/A"
+                        tbl_rows.append(row)
+                    with st.expander(f"📋 Day-by-day data table ({sel_h})", expanded=False):
+                        st.dataframe(pd.DataFrame(tbl_rows), use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # ── Horizon summary table (all 4 horizons)
+            st.markdown("**Horizon Summary — Final-Day Returns**")
             table_rows = []
             for h in ["5d", "10d", "15d", "20d"]:
                 if h not in horizons or "error" in horizons[h]:
                     continue
-                h_data = horizons[h]
-                models = h_data.get("per_model", h_data.get("model_predictions", {}))
+                h_data  = horizons[h]
+                models  = h_data.get("per_model", h_data.get("model_predictions", {}))
                 tcn_val = models.get("TCN", 0)
-                outlier = "⚠️ TCN outlier" if (h == "5d" and abs(tcn_val) > 4.0) or abs(tcn_val) > 3.0 else ""
+                outlier = "⚠️ TCN" if abs(tcn_val) > 3.0 else ""
                 row = {
                     "Horizon":   h,
-                    "Median %":  f"{h_data.get('median_return_pct', h_data.get('predicted_return_pct', 0)):+.1f}%",
-                    "Avg %":     f"{h_data.get('avg_return_pct', h_data.get('predicted_return_pct', 0)):+.1f}%",
-                    "±Uncert":   f"±{h_data.get('model_disagreement', 0):.1f}%",
+                    "Median %":  f"{h_data.get('median_return_pct', 0):+.2f}%",
+                    "Avg %":     f"{h_data.get('avg_return_pct', 0):+.2f}%",
+                    "±Uncert":   f"±{h_data.get('model_disagreement', 0):.2f}%",
                     "Direction": h_data.get("direction", "N/A"),
                 }
-                for m in model_names:
-                    row[m] = f"{models.get(m, 0):+.1f}%" if m in models else "N/A"
-                row["Outliers"] = outlier
+                for m in MODEL_NAMES:
+                    row[m] = f"{models.get(m, 0):+.2f}%" if m in models else "N/A"
+                row["Flag"] = outlier
                 table_rows.append(row)
-
             if table_rows:
                 st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
@@ -385,7 +415,8 @@ if run_btn:
                 f"**Trend:** {multi.get('trend_signal', 'Stable')}  |  "
                 f"Device: `{multi.get('device_used', '?')}`"
             )
-            st.caption("✅ Median is outlier-robust. TCN flagged when |prediction| > 3–4%.")
+            st.caption("Ensemble Median is outlier-robust. TCN flagged when |return| > 3%. "
+                       "Returns shown as cumulative % from today's close.")
         else:
             st.warning(f"Multi-horizon data not available: {multi.get('error', 'No data returned')}")
 

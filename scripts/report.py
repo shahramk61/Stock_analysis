@@ -56,37 +56,71 @@ def generate_report(data, scores, mc_result, profile):
     if "error" not in ensemble:
         print(f"• Ensemble (NHITS+TFT+PatchTST): {ensemble.get('predicted_return_pct', ensemble.get('predicted_5d_return_pct', 0))}% (5d) | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}%")
     
-    # === IMPROVED MULTI-HORIZON SECTION (v4.10) ===
+    # === MULTI-HORIZON DAILY FORECASTS (v4.11) ===
     multi = signals.get('multi_horizon_forecasts', {})
     if "error" not in multi and "horizons" in multi:
-        print("\n📅 Multi-Horizon Forecasts (5d / 10d / 15d / 20d) — Ensemble of 5 SOTA Models")
-        print("-" * 100)
-        print(f"{'Horizon':<6} {'Median%':<8} {'Direction':<12} {'±Uncert':<9} {'Avg%':<7} {'NHITS':<7} {'TFT':<7} {'PatchTST':<9} {'NBEATS':<8} {'TCN':<8} Outliers")
-        print("-" * 100)
+        model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+        W = 110
 
+        print(f"\n{'='*W}")
+        print(f"📅 Multi-Horizon Daily Forecasts (Day-by-Day) — 5 SOTA Models")
+        print(f"{'='*W}")
+
+        # Summary table
+        print(f"\n{'Horizon':<7} {'Median%':<9} {'Avg%':<8} {'Direction':<14} {'±Uncert':<9} " +
+              "  ".join(f"{m:<9}" for m in model_names))
+        print("-" * W)
         for h in ["5d", "10d", "15d", "20d"]:
-            if h in multi["horizons"]:
-                h_data = multi["horizons"][h]
-                models = h_data.get("per_model", {})
+            hd = multi["horizons"].get(h, {})
+            if "error" in hd:
+                print(f"{h:<7} {'ERROR'}")
+                continue
+            pm = hd.get("per_model", {})
+            tcn = pm.get("TCN", 0)
+            outlier = " ⚠️TCN" if abs(tcn) > 3.0 else ""
+            print(f"{h:<7} {hd.get('median_return_pct', 0):>+7.2f}%  "
+                  f"{hd.get('avg_return_pct', 0):>+7.2f}%  "
+                  f"{hd.get('direction', 'N/A'):<14} "
+                  f"±{hd.get('model_disagreement', 0):>5.2f}%  " +
+                  "  ".join(f"{pm.get(m, 0):>+7.2f}%" for m in model_names) + outlier)
+        print("-" * W)
+        print(f"Trend: {multi.get('trend_signal','N/A')}  |  Consensus: {multi.get('consensus_direction','N/A')}")
 
-                median_ret = h_data.get("median_return_pct", h_data.get("predicted_return_pct", 0))
-                avg_ret = h_data.get("avg_return_pct", 0)
-                direction = h_data.get("direction", "Neutral ➕")
-                uncert = h_data.get("model_disagreement", 0)
+        # Day-by-day breakdown per horizon
+        for h in ["5d", "10d", "15d", "20d"]:
+            hd = multi["horizons"].get(h, {})
+            if "error" in hd:
+                continue
+            daily  = hd.get("daily_forecasts", [])
+            pm_d   = hd.get("per_model_daily", {})
+            if not daily:
+                continue
 
-                outlier_note = ""
-                tcn_val = models.get("TCN", 0)
-                if h == "5d" and abs(tcn_val) > 4.0:
-                    outlier_note = "⚠️ TCN Bearish Outlier"
-                elif abs(tcn_val) > 3.0:
-                    outlier_note = "⚠️ TCN outlier"
-
-                print(f"{h:<6} {median_ret:+6.1f}%  {direction:<12} ±{uncert:4.1f}%   {avg_ret:+6.1f}%  "
-                      f"{models.get('NHITS',0):+6.1f}% {models.get('TFT',0):+6.1f}% {models.get('PatchTST',0):+6.1f}% "
-                      f"{models.get('NBEATS',0):+6.1f}% {tcn_val:+6.1f}%  {outlier_note}")
-
-        print("-" * 100)
-        print(f"Overall Trend: {multi.get('trend_signal', 'N/A')} | Consensus: {multi.get('consensus_direction', 'Neutral ➕')}")
+            print(f"\n{h} Horizon → Median: {hd.get('median_return_pct',0):+.2f}% | "
+                  f"Consensus: {hd.get('direction','N/A')}")
+            hdr = f"  {'Day':>4} | {'Median%':>8} | " + " | ".join(f"{m:>8}" for m in model_names)
+            print(f"  {'-'*len(hdr)}")
+            print(hdr)
+            print(f"  {'-'*len(hdr)}")
+            for i, med in enumerate(daily):
+                day_num = i + 1
+                is_last = (day_num == len(daily))
+                per_m   = "  ".join(
+                    f"{pm_d[m][i]:>+7.2f}%" if m in pm_d and i < len(pm_d[m]) else f"{'N/A':>8}"
+                    for m in model_names
+                )
+                # For 10d/15d/20d only print first 5 days and last day to keep output compact
+                if len(daily) > 5 and not (day_num <= 5 or is_last):
+                    if day_num == 6:
+                        print(f"  {'...':>5}")
+                    continue
+                outlier_flag = ""
+                if is_last:
+                    tcn_last = pm_d.get("TCN", [0])[-1] if "TCN" in pm_d else 0
+                    if abs(tcn_last) > 3.0:
+                        outlier_flag = "  ⚠️ TCN outlier"
+                print(f"  {day_num:>4} | {med:>+7.3f}% | {per_m}{outlier_flag}")
+            print(f"  {'-'*len(hdr)}")
     else:
         print(f"\n📅 Multi-Horizon Forecasts: {multi.get('error', 'Not available')}")
     

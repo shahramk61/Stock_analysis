@@ -783,6 +783,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
         for h in horizons:
             model_preds = []
             model_preds_named = []
+            model_daily_preds = {}  # name → list of h daily cumulative returns
             for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"), (PatchTST, "PatchTST"), (NBEATS, "NBEATS"), (TCN, "TCN")]:
                 try:
                     model = ModelClass(
@@ -799,10 +800,12 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                     nf = NeuralForecast(models=[model], freq="B")
                     nf.fit(df=df, val_size=max(h, int(len(df) * 0.1)))
                     preds = nf.predict()
-                    pred_price = preds[name].values[0]
-                    pred_return = (pred_price - last_price) / last_price * 100
-                    model_preds.append(pred_return)
-                    model_preds_named.append((name, pred_return))
+                    pred_prices = preds[name].values  # full h-step array
+                    daily_returns = [round((float(p) - last_price) / last_price * 100, 3) for p in pred_prices]
+                    final_return = daily_returns[-1]  # cumulative return at horizon end
+                    model_preds.append(final_return)
+                    model_preds_named.append((name, final_return))
+                    model_daily_preds[name] = daily_returns
                 except:
                     continue
 
@@ -810,20 +813,33 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                 results[f"{h}d"] = {"error": "All models failed"}
                 continue
 
-            avg_return = round(np.mean(model_preds), 2)
+            avg_return    = round(float(np.mean(model_preds)), 2)
             median_return = round(float(np.median(model_preds)), 2)
-            direction = "Bullish 📈" if avg_return > 1.5 else ("Bearish 📉" if avg_return < -1.5 else "Neutral ➕")
-            std_dev = round(np.std(model_preds), 2)
+            direction     = "Bullish 📈" if avg_return > 1.5 else ("Bearish 📉" if avg_return < -1.5 else "Neutral ➕")
+            std_dev       = round(float(np.std(model_preds)), 2)
+
+            # Day-by-day ensemble series (median and avg across available models)
+            all_daily = list(model_daily_preds.values())
+            if all_daily:
+                n_days        = min(len(d) for d in all_daily)
+                daily_median  = [round(float(np.median([d[i] for d in all_daily])), 3) for i in range(n_days)]
+                daily_avg     = [round(float(np.mean([d[i] for d in all_daily])), 3) for i in range(n_days)]
+            else:
+                daily_median = []
+                daily_avg    = []
 
             results[f"{h}d"] = {
                 "predicted_return_pct": avg_return,
-                "avg_return_pct": avg_return,
-                "median_return_pct": median_return,
-                "direction": direction,
-                "model_disagreement": std_dev,
-                "num_models": len(model_preds),
-                "per_model": {name: round(ret, 2) for name, ret in model_preds_named},
-                "model_predictions": {name: round(ret, 2) for name, ret in model_preds_named},
+                "avg_return_pct":       avg_return,
+                "median_return_pct":    median_return,
+                "direction":            direction,
+                "model_disagreement":   std_dev,
+                "num_models":           len(model_preds),
+                "per_model":            {n: round(r, 2) for n, r in model_preds_named},
+                "model_predictions":    {n: round(r, 2) for n, r in model_preds_named},
+                "daily_forecasts":      daily_median,   # ensemble median per day
+                "daily_avg_forecasts":  daily_avg,
+                "per_model_daily":      model_daily_preds,
             }
 
         # Extra signals for trading bot

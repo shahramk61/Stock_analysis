@@ -742,6 +742,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
         for h in horizons:
             model_preds = []
             model_preds_named = []
+            model_daily_preds = {}
             for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"),
                                      (PatchTST, "PatchTST"), (NBEATS, "NBEATS"),
                                      (TCN, "TCN")]:
@@ -758,10 +759,12 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                     nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
                     val_size = max(h, int(len(df) * 0.1))
                     nf.fit(df=df, val_size=val_size)
-                    pred_price  = float(nf.predict()[name].values[0])
-                    pred_return = (pred_price - last_price) / last_price * 100
-                    model_preds.append(pred_return)
-                    model_preds_named.append((name, pred_return))
+                    pred_prices  = nf.predict()[name].values
+                    daily_returns = [round((float(p) - last_price) / last_price * 100, 3) for p in pred_prices]
+                    final_return  = daily_returns[-1]
+                    model_preds.append(final_return)
+                    model_preds_named.append((name, final_return))
+                    model_daily_preds[name] = daily_returns
                 except Exception:
                     continue
 
@@ -774,6 +777,12 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
             std_dev    = round(float(np.std(model_preds)), 2)
             direction  = ("Bullish" if avg_ret > 1.5 else
                           "Bearish" if avg_ret < -1.5 else "Neutral")
+
+            all_daily    = list(model_daily_preds.values())
+            n_days       = min(len(d) for d in all_daily) if all_daily else 0
+            daily_median = [round(float(np.median([d[i] for d in all_daily])), 3) for i in range(n_days)]
+            daily_avg    = [round(float(np.mean([d[i] for d in all_daily])), 3) for i in range(n_days)]
+
             results[f"{h}d"] = {
                 "predicted_return_pct": avg_ret,
                 "avg_return_pct":       avg_ret,
@@ -783,6 +792,9 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                 "num_models":           len(model_preds),
                 "per_model":            {n: round(r, 2) for n, r in model_preds_named},
                 "model_predictions":    {n: round(r, 2) for n, r in model_preds_named},
+                "daily_forecasts":      daily_median,
+                "daily_avg_forecasts":  daily_avg,
+                "per_model_daily":      model_daily_preds,
             }
 
         valid_rets = [results[f"{h}d"]["predicted_return_pct"]
