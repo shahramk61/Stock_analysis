@@ -12,7 +12,7 @@ from dcf import calculate_dcf
 from gpu_utils import gpu_available
 
 
-def calculate_pillars(data: dict, profile: str = "Balanced"):
+def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False):
     ticker = data['ticker']
     info   = data['info']
 
@@ -45,7 +45,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     chronos     = get_chronos_forecast(ticker)
     finbert     = get_finbert_sentiment(ticker)
     dl_ensemble = get_nhits_tft_patchtst_ensemble(ticker)
-    multi_h     = get_multi_horizon_forecasts(ticker)
+    multi_h     = get_multi_horizon_forecasts(ticker, compute_dynamic_weights=compute_dynamic_weights)
 
     # ── Pillar scoring ───────────────────────────────────────────────────────
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0

@@ -21,11 +21,13 @@ st.set_page_config(
 
 with st.sidebar:
     st.title("📊 Stock Analyzer")
-    st.caption("v4.13 · GPU-accelerated · Multi-Horizon Ensemble + LSTM + Chronos")
+    st.caption("v4.24 · 7-model ensemble + weighted means")
     ticker = st.text_input("Ticker Symbol", value="AAPL", max_chars=8).upper().strip()
     profile = st.selectbox("Investor Profile", ["Balanced", "Growth", "Value", "Momentum"])
     use_gpu = st.toggle("Enable GPU Signals (LSTM + DL Ensemble)", value=True)
-    st.caption("⚠️ GPU signals add ~2-3 min per analysis")
+    dyn_weights = st.toggle("Compute Dynamic Weights (Option B)", value=False,
+                            help="Out-of-sample backtest on last 10 days to compute model weights — ~2x slower")
+    st.caption("⚠️ GPU signals add ~2-3 min; dynamic weights doubles that")
     run_btn = st.button("🔍 Run Analysis", type="primary", use_container_width=True)
     st.divider()
     st.markdown("**Compare Tickers**")
@@ -49,7 +51,7 @@ def score_emoji(s):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def run_analysis(ticker, profile, use_gpu):
+def run_analysis(ticker, profile, use_gpu, dyn_weights=False):
     from fetch_data import fetch_stock_data
     from score import calculate_pillars
     from montecarlo import run_monte_carlo
@@ -61,7 +63,7 @@ def run_analysis(ticker, profile, use_gpu):
         sm.get_lstm_forecast     = lambda t, **k: {"direction": "Disabled", "predicted_return_pct": 0, "signal_strength": 0, "device_used": "disabled"}
         sm.get_finbert_sentiment = lambda t, **k: {"overall_sentiment": "Disabled", "sentiment_score": 50, "num_articles": 0}
         sm.get_nhits_tft_patchtst_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
-    scores = calculate_pillars(data, profile)
+    scores = calculate_pillars(data, profile, compute_dynamic_weights=dyn_weights)
     mc12 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=252)
     mc36 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=756)
     return data, scores, mc12, mc36
@@ -112,7 +114,7 @@ if run_btn:
     run_analysis.clear()                    # clear @st.cache_data
     with st.spinner(f"Analyzing {ticker}... (GPU signals may take 2-3 min)"):
         try:
-            data, scores, mc12, mc36 = run_analysis(ticker, profile, use_gpu)
+            data, scores, mc12, mc36 = run_analysis(ticker, profile, use_gpu, dyn_weights)
             st.session_state['results'] = (data, scores, mc12, mc36)
             st.session_state['ready']   = True
         except Exception as e:
@@ -451,8 +453,10 @@ if st.session_state.get('ready'):
 
             st.divider()
 
-            # ── Horizon summary table (all 4 horizons)
-            st.markdown("**Horizon Summary — Final-Day Returns**")
+            # ── Horizon summary table — 4 ensemble methods + per-model
+            st.markdown("**Horizon Summary — Final-Day Returns (4 ensemble methods)**")
+            has_dyn = any(horizons.get(h, {}).get("weighted_dynamic_pct") is not None
+                          for h in ["5d", "10d", "15d", "20d", "50d"])
             table_rows = []
             for h in ["5d", "10d", "15d", "20d", "50d"]:
                 if h not in horizons or "error" in horizons[h]:
@@ -461,13 +465,18 @@ if st.session_state.get('ready'):
                 models  = h_data.get("per_model", h_data.get("model_predictions", {}))
                 tcn_val = models.get("TCN", 0)
                 outlier = "⚠️ TCN" if abs(tcn_val) > 3.0 else ""
+                wm_s    = h_data.get("weighted_static_pct")
+                wm_d    = h_data.get("weighted_dynamic_pct")
                 row = {
                     "Horizon":   h,
                     "Median %":  f"{h_data.get('median_return_pct', 0):+.2f}%",
                     "Avg %":     f"{h_data.get('avg_return_pct', 0):+.2f}%",
-                    "±Uncert":   f"±{h_data.get('model_disagreement', 0):.2f}%",
-                    "Direction": h_data.get("direction", "N/A"),
+                    "WgtStat %": f"{wm_s:+.2f}%" if wm_s is not None else "N/A",
                 }
+                if has_dyn:
+                    row["WgtDyn %"] = f"{wm_d:+.2f}%" if wm_d is not None else "N/A"
+                row["±Uncert"]   = f"±{h_data.get('model_disagreement', 0):.2f}%"
+                row["Direction"] = h_data.get("direction", "N/A")
                 for m in MODEL_NAMES:
                     row[m] = f"{models.get(m, 0):+.2f}%" if m in models else "N/A"
                 row["Flag"] = outlier
@@ -475,13 +484,28 @@ if st.session_state.get('ready'):
             if table_rows:
                 st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
+            # ── Show weight details
+            sw = multi.get("static_weights", {})
+            dwi = multi.get("dynamic_weights_info")
+            wc1, wc2 = st.columns(2)
+            with wc1:
+                if sw:
+                    st.markdown("**Static weights** (Option A)")
+                    st.json(sw, expanded=False)
+            with wc2:
+                if dwi and dwi.get("weights"):
+                    st.markdown(f"**Dynamic weights** (Option B, val_h={dwi.get('val_h')})")
+                    st.json({"weights": dwi["weights"], "errors_mae": dwi.get("errors_mae", {})}, expanded=False)
+                elif dyn_weights:
+                    st.info("Dynamic weights not available — backtest may have failed (insufficient history).")
+
             st.success(
                 f"**Consensus:** {multi.get('consensus_direction', 'Neutral')}  |  "
                 f"**Trend:** {multi.get('trend_signal', 'Stable')}  |  "
                 f"Device: `{multi.get('device_used', '?')}`"
             )
-            st.caption("Ensemble Median is outlier-robust. TCN flagged when |return| > 3%. "
-                       "Returns shown as cumulative % from today's close. LSTM & Chronos now plotted as extra lines.")
+            st.caption("Median is outlier-robust. WgtStat uses fixed priors. WgtDyn uses backtest-derived weights (1/MAE). "
+                       "TCN flagged when |return| > 3%. Returns shown as cumulative % from today's close.")
         else:
             st.warning(f"Multi-horizon data not available: {multi.get('error', 'No data returned')}")
 
