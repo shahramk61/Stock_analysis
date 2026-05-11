@@ -239,31 +239,37 @@ if st.session_state.get('ready'):
         dl      = sig.get('dl_ensemble', sig.get('ensemble_forecast', {}))
         c1,c2,c3,c4 = st.columns(4)
         with c1:
-            st.markdown("**LSTM (next-day)**")
-            if 'error' not in lstm:
-                pred = lstm.get('predicted_return_pct',0)
-                d_  = lstm.get('direction','N/A')
-                e   = "🟢" if d_=="Bullish" else ("🔴" if d_=="Bearish" else "🟡")
-                st.metric("Predicted Return",  f"{pred:+.2f}%")
-                st.metric("Direction",         f"{e} {d_}")
-                st.metric("Signal Strength",   f"{lstm.get('signal_strength',0):.0f}/100")
-                st.caption(f"Device: `{lstm.get('device_used','?')}`")
+            st.markdown("**🧠 LSTM Forecast**")
+            if lstm and 'error' not in lstm:
+                pred  = lstm.get('predicted_return_pct', 0)
+                d_    = lstm.get('direction', 'Neutral')
+                plen  = lstm.get('prediction_length', 5)
+                e     = "🟢" if "Bullish" in d_ else ("🔴" if "Bearish" in d_ else "🟡")
+                st.metric(f"{plen}-Day Forecast", f"{pred:+.2f}%")
+                st.metric("Direction", f"{e} {d_}")
+                preds = lstm.get('all_predictions', [])
+                if preds:
+                    st.caption("Daily path: " + " → ".join(f"{v:+.2f}%" for v in preds))
+                st.caption(f"Device: `{lstm.get('device_used','?')}` | {lstm.get('model','LSTM')}")
             else:
-                st.warning(lstm.get('error','?'))
+                st.warning(f"LSTM: {lstm.get('error','No data')}")
         with c2:
-            st.markdown("**Chronos-2 (zero-shot, 5-day)**")
-            if 'error' not in chronos and 'predicted_return_pct' in chronos:
-                p_c = chronos.get('predicted_return_pct', 0)
-                d_c = chronos.get('direction', 'N/A')
-                e_c = "🟢" if d_c=="Bullish" else ("🔴" if d_c=="Bearish" else "🟡")
-                st.metric("5-Day Forecast",  f"{p_c:+.2f}%")
-                st.metric("Direction",       f"{e_c} {d_c}")
-                st.metric("10th–90th range", f"{chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}%")
-                st.metric("Uncertainty",     f"±{chronos.get('uncertainty_range_pct',0):.1f}%")
-                st.metric("Uncertainty",     f"±{chronos.get('uncertainty_pct',0):.2f}%")
+            st.markdown("**⏱️ Chronos-2 (zero-shot)**")
+            if chronos and 'error' not in chronos and 'predicted_return_pct' in chronos:
+                p_c  = chronos.get('predicted_return_pct', 0)
+                d_c  = chronos.get('direction', 'Neutral')
+                plen = chronos.get('prediction_length', 5)
+                e_c  = "🟢" if "Bullish" in d_c else ("🔴" if "Bearish" in d_c else "🟡")
+                st.metric(f"{plen}-Day Forecast", f"{p_c:+.2f}%")
+                st.metric("Direction",            f"{e_c} {d_c}")
+                lo  = chronos.get('lower_10pct', 0)
+                hi  = chronos.get('upper_90pct', 0)
+                unc = chronos.get('uncertainty_range_pct', chronos.get('uncertainty_pct', 0))
+                st.metric("10th–90th range", f"{lo:+.1f}% to {hi:+.1f}%")
+                st.metric("Uncertainty",     f"±{unc:.1f}%")
                 st.caption(f"Device: `{chronos.get('device_used','?')}` | {chronos.get('model','Chronos-2')}")
             else:
-                st.warning(chronos.get('error','not installed')[:80])
+                st.warning(f"Chronos-2: {chronos.get('error', 'No data')}")
         with c3:
             st.markdown("**FinBERT (news)**")
             n = finbert.get('num_articles',0)
