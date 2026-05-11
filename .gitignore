@@ -8,3 +8,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# PyTorch Lightning training logs
+lightning_logs/
+
+# Generated signal JSON files
+signals_*.json
+
