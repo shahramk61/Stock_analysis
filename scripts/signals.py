@@ -801,3 +801,101 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         return {"error": "neuralforecast not installed. Install with: pip install neuralforecast"}
     except Exception as e:
         return {"error": str(e)[:150]}
+
+
+def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
+    """
+    Multi-horizon forecasting signal — runs top NeuralForecast models (NHITS, TFT, PatchTST, N-BEATS, TCN)
+    for multiple future horizons (5d, 10d, 15d, 20d) to give richer signals for the trading bot.
+    
+    Returns:
+    - Average predicted return per horizon
+    - Consensus direction
+    - Trend consistency (how many models agree on direction)
+    - Acceleration signal (is the forecast getting more bullish/bearish over time?)
+    """
+    try:
+        import torch
+        import pandas as pd
+        import numpy as np
+        from neuralforecast import NeuralForecast
+        from neuralforecast.models import NHITS, TFT, PatchTST, NBEATS, TCN
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            torch.set_float32_matmul_precision('high')
+
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="5y")
+        if len(hist) < 100:
+            return {"error": "Insufficient price history for multi-horizon forecasting"}
+
+        df = pd.DataFrame({
+            "unique_id": "stock",
+            "ds": hist.index.tz_localize(None),
+            "y": hist["Close"].values
+        })
+
+        results = {}
+        last_price = hist["Close"].iloc[-1]
+
+        for h in horizons:
+            model_preds = []
+            for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"), (PatchTST, "PatchTST"), (NBEATS, "NBEATS"), (TCN, "TCN")]:
+                try:
+                    model = ModelClass(
+                        h=h,
+                        input_size=120,
+                        max_steps=40,
+                        learning_rate=0.001,
+                        loss="MAE",
+                        valid_loss="MAE",
+                        early_stop_patience_steps=8,
+                        batch_size=32,
+                        random_seed=42,
+                    )
+                    nf = NeuralForecast(models=[model], freq="B")
+                    nf.fit(df=df, val_size=max(h, int(len(df) * 0.1)))
+                    preds = nf.predict()
+                    pred_price = preds[name].values[0]
+                    pred_return = (pred_price - last_price) / last_price * 100
+                    model_preds.append(pred_return)
+                except:
+                    continue
+
+            if not model_preds:
+                results[f"{h}d"] = {"error": "All models failed"}
+                continue
+
+            avg_return = round(np.mean(model_preds), 2)
+            direction = "Bullish 📈" if avg_return > 1.5 else ("Bearish 📉" if avg_return < -1.5 else "Neutral ➕")
+            std_dev = round(np.std(model_preds), 2)  # disagreement = uncertainty
+
+            results[f"{h}d"] = {
+                "predicted_return_pct": avg_return,
+                "direction": direction,
+                "model_disagreement": std_dev,
+                "num_models": len(model_preds)
+            }
+
+        # Extra signals for trading bot
+        returns = [results[f"{h}d"]["predicted_return_pct"] for h in horizons if f"{h}d" in results]
+        if returns:
+            trend = "Accelerating Bullish" if returns[-1] > returns[0] + 2 else \
+                    ("Accelerating Bearish" if returns[-1] < returns[0] - 2 else "Stable")
+        else:
+            trend = "Unknown"
+
+        return {
+            "horizons": results,
+            "consensus_direction": max(set([r["direction"] for r in results.values() if "direction" in r]), 
+                                       key=lambda x: sum(1 for r in results.values() if r.get("direction") == x)),
+            "trend_signal": trend,
+            "model": "Multi-Horizon Ensemble (NHITS + TFT + PatchTST + N-BEATS + TCN)",
+            "device_used": device
+        }
+
+    except ImportError:
+        return {"error": "neuralforecast not installed"}
+    except Exception as e:
+        return {"error": str(e)[:150]}
