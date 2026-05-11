@@ -351,20 +351,28 @@ if st.session_state.get('ready'):
                 pm_px    = hd.get("per_model_daily_prices", {})
                 dates    = hd.get("forecast_dates", [])
                 last_px  = hd.get("last_price", price)
-                x_vals   = dates if dates else list(range(1, len(daily) + 1))
+                today_str = str(pd.Timestamp.today().date())
+                # Prepend today as anchor point so chart clearly starts from present
+                x_vals    = ([today_str] + dates) if dates else list(range(len(daily) + 1))
 
                 # ── View toggle
                 view      = st.radio("Y-axis:", ["% Cumulative Return", "Projected Price ($)"],
                                      horizontal=True, key="yaxis_toggle")
                 use_price = (view == "Projected Price ($)")
 
-                # ── Daily time-series chart
+                if use_price and not daily_px:
+                    st.warning("Price data not available — click **Run Analysis** again to refresh.")
+
+                # ── Daily time-series chart (Day 0 = Today anchor, then forecast)
                 fig_daily = go.Figure()
+
+                # Per-model forecast lines (anchored at today's price / 0%)
                 for m in MODEL_NAMES:
-                    y_m = pm_px.get(m) if use_price else pm_d.get(m)
-                    if y_m:
+                    y_raw = pm_px.get(m) if use_price else pm_d.get(m)
+                    if y_raw:
+                        y_anchored = ([last_px] + y_raw) if use_price else ([0.0] + y_raw)
                         fig_daily.add_trace(go.Scatter(
-                            x=x_vals[:len(y_m)], y=y_m,
+                            x=x_vals[:len(y_anchored)], y=y_anchored,
                             mode="lines", name=m,
                             line=dict(color=MODEL_COLORS[m], width=1.5, dash="dot"),
                             opacity=0.75,
@@ -374,12 +382,13 @@ if st.session_state.get('ready'):
                                 + "<extra></extra>"
                             ),
                         ))
-                if use_price and not daily_px:
-                    st.warning("Price data not available — click **Run Analysis** again to refresh.")
-                y_med = daily_px if use_price else daily
-                if y_med:
+
+                # Ensemble median — bold, anchored
+                y_raw_med = daily_px if use_price else daily
+                if y_raw_med:
+                    y_med_anchored = ([last_px] + y_raw_med) if use_price else ([0.0] + y_raw_med)
                     fig_daily.add_trace(go.Scatter(
-                        x=x_vals[:len(y_med)], y=y_med,
+                        x=x_vals[:len(y_med_anchored)], y=y_med_anchored,
                         mode="lines+markers", name="Ensemble Median",
                         line=dict(color="#ffffff", width=3), marker=dict(size=5),
                         hovertemplate=(
@@ -388,14 +397,20 @@ if st.session_state.get('ready'):
                             + "<extra></extra>"
                         ),
                     ))
+
+                # "Today" vertical marker
+                fig_daily.add_vline(x=today_str, line_dash="solid", line_color="#facc15",
+                                    opacity=0.8, annotation_text="Today",
+                                    annotation_position="top left",
+                                    annotation_font_color="#facc15")
                 if use_price:
                     fig_daily.add_hline(y=last_px, line_dash="dash", line_color="gray",
-                                        opacity=0.6, annotation_text=f"Today ${last_px:.2f}")
+                                        opacity=0.4, annotation_text=f"${last_px:.2f}")
                 else:
-                    fig_daily.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                    fig_daily.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.4)
 
                 fig_daily.update_layout(
-                    title=f"{'Projected Price' if use_price else 'Cumulative Return'} — {sel_h} Horizon",
+                    title=f"🔮 {'Projected Price' if use_price else 'Cumulative Return'} Forecast — {sel_h} Horizon (starting today)",
                     xaxis=dict(title="Date", type="category", tickangle=-35),
                     yaxis_title="Price ($)" if use_price else "Cumulative Return %",
                     template="plotly_dark", height=460, hovermode="x unified",
