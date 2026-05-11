@@ -1,5 +1,5 @@
 """
-Stock Analysis Dashboard — v4.10
+Stock Analysis Dashboard — v4.13
 Streamlit UI for the full signal pipeline (CPU + GPU signals).
 Run: streamlit run scripts/dashboard.py
 """
@@ -21,7 +21,7 @@ st.set_page_config(
 
 with st.sidebar:
     st.title("📊 Stock Analyzer")
-    st.caption("v4.10 · GPU-accelerated · Multi-Horizon Ensemble")
+    st.caption("v4.13 · GPU-accelerated · Multi-Horizon Ensemble + LSTM + Chronos")
     ticker = st.text_input("Ticker Symbol", value="AAPL", max_chars=8).upper().strip()
     profile = st.selectbox("Investor Profile", ["Balanced", "Growth", "Value", "Momentum"])
     use_gpu = st.toggle("Enable GPU Signals (LSTM + DL Ensemble)", value=True)
@@ -334,9 +334,9 @@ if st.session_state.get('ready'):
         c2.metric("Stop-loss level (−15%)", f"${mc12['stop_price']:.2f}")
         st.caption(f"σ={data.get('annual_vol',0):.1f}% ann. · μ={mc12['drift']*100:.1f}% (score-derived) · 10,000 paths")
 
-    # TAB 5 — Multi-Horizon (v4.11 — daily time-series)
+    # TAB 5 — Multi-Horizon (v4.13 — daily time-series + LSTM + Chronos)
     with tabs[5]:
-        st.subheader("📅 Multi-Horizon Daily Forecasts — 5 SOTA Models (NHITS · TFT · PatchTST · N-BEATS · TCN)")
+        st.subheader("📅 Multi-Horizon Daily Forecasts — 7 SOTA Models (NHITS · TFT · PatchTST · N-BEATS · TCN · LSTM · Chronos)")
         multi = sig.get('multi_horizon_forecasts', sig.get('multi_h', {}))
         MODEL_NAMES = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
         MODEL_COLORS = {"NHITS": "#3b82f6", "TFT": "#f59e0b", "PatchTST": "#22c55e",
@@ -360,6 +360,10 @@ if st.session_state.get('ready'):
                 today_str = str(pd.Timestamp.today().date())
                 # Prepend today as anchor point so chart clearly starts from present
                 x_vals    = ([today_str] + dates) if dates else list(range(len(daily) + 1))
+
+                # Load LSTM and Chronos for extra traces
+                lstm    = sig.get('lstm_forecast', sig.get('lstm', {}))
+                chronos = sig.get('chronos_forecast', sig.get('chronos', {}))
 
                 # ── View toggle
                 view      = st.radio("Y-axis:", ["% Cumulative Return", "Projected Price ($)"],
@@ -387,6 +391,41 @@ if st.session_state.get('ready'):
                                 + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
                                 + "<extra></extra>"
                             ),
+                        ))
+
+                # === NEW: LSTM (green dashed) + Chronos (orange dotted) ===
+                # LSTM: incremental daily returns → cumulative
+                if lstm and "all_predictions" in lstm:
+                    inc_returns = lstm["all_predictions"]
+                    if inc_returns:
+                        cum_lstm = np.cumsum(inc_returns).tolist()
+                        h_len = len(daily) if daily else len(cum_lstm)
+                        cum_lstm = cum_lstm[:h_len]
+                        y_lstm = ([0.0] + cum_lstm) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_lstm])
+                        fig_daily.add_trace(go.Scatter(
+                            x=x_vals[:len(y_lstm)], y=y_lstm,
+                            mode="lines", name="LSTM",
+                            line=dict(color="#22c55e", width=2, dash="dash"),
+                            opacity=0.85,
+                            hovertemplate=("<b>LSTM</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
+                        ))
+
+                # Chronos: linear path to final predicted return
+                if chronos and "predicted_return_pct" in chronos and "prediction_length" in chronos:
+                    plen = chronos.get("prediction_length", 5)
+                    final_ret = chronos["predicted_return_pct"]
+                    if plen > 0 and final_ret is not None:
+                        daily_inc = [final_ret / plen] * plen
+                        cum_chronos = np.cumsum(daily_inc).tolist()
+                        h_len = len(daily) if daily else len(cum_chronos)
+                        cum_chronos = cum_chronos[:h_len]
+                        y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
+                        fig_daily.add_trace(go.Scatter(
+                            x=x_vals[:len(y_chronos)], y=y_chronos,
+                            mode="lines", name="Chronos-2",
+                            line=dict(color="#f97316", width=2, dash="dot"),
+                            opacity=0.85,
+                            hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
                         ))
 
                 # Ensemble median — bold, anchored
@@ -476,7 +515,7 @@ if st.session_state.get('ready'):
                 f"Device: `{multi.get('device_used', '?')}`"
             )
             st.caption("Ensemble Median is outlier-robust. TCN flagged when |return| > 3%. "
-                       "Returns shown as cumulative % from today's close.")
+                       "Returns shown as cumulative % from today's close. LSTM & Chronos now plotted as extra lines.")
         else:
             st.warning(f"Multi-horizon data not available: {multi.get('error', 'No data returned')}")
 
