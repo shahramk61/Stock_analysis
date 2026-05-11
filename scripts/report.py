@@ -36,7 +36,13 @@ def generate_report(data, scores, mc_result, profile):
     
     # LSTM
     lstm = signals.get('lstm_forecast', {})
-    print(f"• LSTM DL Forecast : {lstm.get('predicted_next_return_pct', lstm.get('predicted_return_pct', 0))}% next-day | {lstm.get('direction', 'N/A')}")
+    lstm_preds = lstm.get('all_predictions', [])
+    plen = lstm.get('prediction_length', len(lstm_preds) or 1)
+    if lstm_preds:
+        daily_str = " → ".join(f"{v:+.2f}%" for v in lstm_preds)
+        print(f"• LSTM DL Forecast : {plen}d path: {daily_str} | {lstm.get('direction', 'N/A')} | device: {lstm.get('device_used','?')}")
+    else:
+        print(f"• LSTM DL Forecast : {lstm.get('predicted_return_pct', 0):+.2f}% ({plen}d) | {lstm.get('direction', 'N/A')}")
     
     # Chronos
     chronos = signals.get('chronos_forecast', {})
