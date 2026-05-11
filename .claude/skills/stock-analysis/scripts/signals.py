@@ -186,6 +186,73 @@ def get_relative_strength(ticker: str, period="2y"):
     except:
         return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}
 
+def get_momentum_and_52w_high(ticker: str, period: str = "2y"):
+    """Price momentum (6m, 12m) and proximity to 52-week high (Novy-Marx momentum)."""
+    stock = yf.Ticker(ticker)
+    try:
+        hist = stock.history(period=period)['Close']
+        if len(hist) < 252:
+            return {"mom_6m": 0.0, "mom_12m": 0.0, "pct_from_52w_high": 0.0, "signal": "Neutral"}
+
+        mom_6m  = float((hist.iloc[-1] / hist.iloc[-126] - 1) * 100)
+        mom_12m = float((hist.iloc[-1] / hist.iloc[-252] - 1) * 100)
+        high_52w = float(hist.tail(252).max())
+        pct_from_high = float((hist.iloc[-1] / high_52w - 1) * 100)
+
+        signal = ("Strong Momentum" if mom_6m > 10 and mom_12m > 15
+                  else "Momentum"   if mom_6m > 0  and mom_12m > 0
+                  else "Weak"       if mom_6m < -10
+                  else "Neutral")
+
+        return {
+            "mom_6m":            round(mom_6m, 2),
+            "mom_12m":           round(mom_12m, 2),
+            "momentum_6m":       round(mom_6m, 2),
+            "momentum_12m":      round(mom_12m, 2),
+            "pct_from_52w_high": round(pct_from_high, 2),
+            "near_52w_high":     bool(pct_from_high > -5),
+            "dist_to_52w_high":  round(pct_from_high, 2),
+            "signal":            signal,
+        }
+    except:
+        return {"mom_6m": 0.0, "mom_12m": 0.0, "momentum_6m": 0.0, "momentum_12m": 0.0,
+                "pct_from_52w_high": 0.0, "near_52w_high": False, "signal": "Neutral"}
+
+
+def get_quality_accruals_gross_profit(ticker: str):
+    """Gross profitability and accruals quality (Novy-Marx style quality factor)."""
+    stock = yf.Ticker(ticker)
+    try:
+        inc = stock.income_stmt
+        bs  = stock.balance_sheet
+        cfs = stock.cashflow
+        if inc.empty or bs.empty:
+            return {"gross_profitability": 0.0, "accruals_ratio": 0.0, "quality": "Unknown"}
+
+        revenue     = inc.loc['Total Revenue'].iloc[0]    if 'Total Revenue'    in inc.index else None
+        cogs        = inc.loc['Cost Of Revenue'].iloc[0]  if 'Cost Of Revenue'  in inc.index else None
+        total_assets = bs.loc['Total Assets'].iloc[0]     if 'Total Assets'     in bs.index  else None
+        net_income  = inc.loc['Net Income'].iloc[0]       if 'Net Income'       in inc.index else None
+        op_cf       = cfs.loc['Operating Cash Flow'].iloc[0] if 'Operating Cash Flow' in cfs.index else None
+
+        gp = (revenue - cogs) / total_assets * 100 if (revenue and cogs and total_assets) else 0.0
+        accruals = (net_income - op_cf) / total_assets if (net_income and op_cf and total_assets) else 0.0
+
+        quality = ("High"   if gp > 30 and accruals < 0.05
+                   else "Medium" if gp > 15
+                   else "Low")
+
+        return {
+            "gross_profitability": round(float(gp), 2),
+            "accruals_ratio":      round(float(accruals), 4),
+            "quality":             quality,
+            "high_quality":        quality == "High",
+            "accruals":            round(float(accruals) * 100, 4),
+        }
+    except:
+        return {"gross_profitability": 0.0, "accruals_ratio": 0.0, "quality": "Unknown", "high_quality": False}
+
+
 def get_market_regime(ticker: str, period: str = "3y", n_states: int = 3):
     """Hidden Markov Model (HMM) for market regime detection.
     Detects Bull/Neutral/Bear regimes based on returns.

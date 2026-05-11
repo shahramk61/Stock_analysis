@@ -36,7 +36,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     quality_boost = (quality['gross_profitability'] * 0.3) + (10 if quality['high_quality'] else 0)
 
     # Liquidity boost: higher turnover good, lower illiquidity good
-    liquidity_boost = (turnover * 0.05) - (amihud * 5000)
+    liquidity_boost = (turnover.get("turnover", 0) * 0.05) - (amihud.get("amihud", 0) * 5000)
 
     # Volume & formulaic alpha boost to technicals
     vol_alpha_boost = (vol_price['vol_price_corr'] * 15) + (formulaic_alpha['alpha'] * 25) + (cmf['cmf'] * 20) + (obv['obv_change_20d_pct'] * 0.08)
