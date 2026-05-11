@@ -56,15 +56,33 @@ def generate_report(data, scores, mc_result, profile):
     if "error" not in ensemble:
         print(f"• Ensemble (NHITS+TFT+PatchTST): {ensemble.get('predicted_return_pct', ensemble.get('predicted_5d_return_pct', 0))}% (5d) | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}%")
     
-    # Multi-Horizon Forecasts (5d / 10d / 15d / 20d)
+    # Multi-Horizon Forecasts (5d / 10d / 15d / 20d) — per-model breakdown
     multi = signals.get('multi_horizon_forecasts', {})
     if "error" not in multi and "horizons" in multi:
         print("\n📅 Multi-Horizon Forecasts (5d / 10d / 15d / 20d):")
+        model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+        # Header row
+        header = f"   {'Horizon':>8}  {'Avg':>7}  {'Dir':<14}  {'Uncert':>8}  " + "  ".join(f"{m:>8}" for m in model_names)
+        print(f"   {'-'*len(header)}")
+        print(f"   {'Horizon':>8}  {'Avg%':>7}  {'Direction':<14}  {'±Uncert':>8}  " + "  ".join(f"{m:>8}" for m in model_names))
+        print(f"   {'-'*len(header)}")
         for h in ["5d", "10d", "15d", "20d"]:
             if h in multi["horizons"]:
                 h_data = multi["horizons"][h]
-                print(f"   {h:>4}  →  {h_data.get('predicted_return_pct', 0):+6.1f}%   | {h_data.get('direction', 'N/A')}   (uncert: ±{h_data.get('model_disagreement', 0)}%)")
-        print(f"   Trend: {multi.get('trend_signal', 'N/A')}")
+                if "error" in h_data:
+                    print(f"   {h:>8}  {'N/A':>7}  {'Error':<14}  {'N/A':>8}")
+                    continue
+                avg = h_data.get('predicted_return_pct', 0)
+                direction = h_data.get('direction', 'N/A')
+                uncert = h_data.get('model_disagreement', 0)
+                model_preds = h_data.get('model_predictions', {})
+                per_model = "  ".join(
+                    f"{model_preds[m]:>+7.1f}%" if m in model_preds else f"{'N/A':>8}"
+                    for m in model_names
+                )
+                print(f"   {h:>8}  {avg:>+6.1f}%  {direction:<14}  ±{uncert:>6.2f}%  {per_model}")
+        print(f"   {'-'*len(header)}")
+        print(f"   Trend: {multi.get('trend_signal', 'N/A')}  |  Consensus: {multi.get('consensus_direction', 'N/A')}")
     else:
         print(f"\n📅 Multi-Horizon: {multi.get('error', 'N/A')}")
     

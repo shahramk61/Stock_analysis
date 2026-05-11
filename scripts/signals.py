@@ -782,6 +782,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
 
         for h in horizons:
             model_preds = []
+            model_preds_named = []
             for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"), (PatchTST, "PatchTST"), (NBEATS, "NBEATS"), (TCN, "TCN")]:
                 try:
                     model = ModelClass(
@@ -801,6 +802,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                     pred_price = preds[name].values[0]
                     pred_return = (pred_price - last_price) / last_price * 100
                     model_preds.append(pred_return)
+                    model_preds_named.append((name, pred_return))
                 except:
                     continue
 
@@ -816,7 +818,8 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                 "predicted_return_pct": avg_return,
                 "direction": direction,
                 "model_disagreement": std_dev,
-                "num_models": len(model_preds)
+                "num_models": len(model_preds),
+                "model_predictions": {name: round(ret, 2) for name, ret in model_preds_named}
             }
 
         # Extra signals for trading bot
