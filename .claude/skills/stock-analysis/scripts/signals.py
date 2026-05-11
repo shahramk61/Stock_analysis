@@ -607,8 +607,7 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5,
 def get_tcn_forecast(ticker: str, prediction_length: int = 5,
                      input_size: int = 120, epochs: int = 50):
     """TCN — fast dilated causal convolutions, excellent for long-range dependencies."""
-    return _nf_forecast(ticker, TCN, "TCN", prediction_length, input_size, epochs,
-                        extra_kwargs={"hidden_size": 128})
+    return _nf_forecast(ticker, TCN, "TCN", prediction_length, input_size, epochs)
 
 
 def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):

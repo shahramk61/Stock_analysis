@@ -51,7 +51,7 @@ def generate_report(data, scores, mc_result, profile):
     else:
         print(f"• FinBERT Sentiment: unavailable ({finbert.get('error','?')})")
     if 'error' not in dl:
-        print(f"• DL Ensemble      : {dl.get('predicted_5d_return_pct',0):+.2f}% (5d) → {dl.get('direction','N/A')} | uncertainty: ±{dl.get('uncertainty_pct',0):.2f}% | models: {dl.get('models_used',0)}/3 | device: {dl.get('device_used','?')}")
+        print(f"• DL Ensemble      : {dl.get('predicted_5d_return_pct',0):+.2f}% (5d) → {dl.get('direction','N/A')} | uncertainty: ±{dl.get('uncertainty_pct',0):.2f}% | models: {dl.get("models_used",0)}/5 | device: {dl.get('device_used','?')}")
     else:
         print(f"• DL Ensemble      : unavailable ({dl.get('error','?')})")
 
