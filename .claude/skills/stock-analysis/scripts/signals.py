@@ -80,7 +80,7 @@ def get_earnings_surprise(ticker: str):
     except:
         return {"avg_surprise_pct": 0.0, "post_earnings_drift": 0.0}
 
-def get_rolling_beta(ticker: str, period="2y"):
+def get_rolling_beta(ticker: str, period="5y"):
     stock = yf.Ticker(ticker)
     spy = yf.Ticker("SPY")
     try:
@@ -153,7 +153,7 @@ def get_atr_volatility_clustering(ticker: str, period="1y"):
         "risk_level": "Elevated" if clustering == "High" else "Normal"
     }
 
-def get_relative_strength(ticker: str, period="2y"):
+def get_relative_strength(ticker: str, period="5y"):
     """New Signal: Relative Strength vs SPY and Sector"""
     stock = yf.Ticker(ticker)
     spy = yf.Ticker("SPY")
@@ -186,7 +186,7 @@ def get_relative_strength(ticker: str, period="2y"):
     except:
         return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}
 
-def get_momentum_and_52w_high(ticker: str, period: str = "2y"):
+def get_momentum_and_52w_high(ticker: str, period: str = "5y"):
     """Price momentum (6m, 12m) and proximity to 52-week high (Novy-Marx momentum)."""
     stock = yf.Ticker(ticker)
     try:
@@ -253,7 +253,7 @@ def get_quality_accruals_gross_profit(ticker: str):
         return {"gross_profitability": 0.0, "accruals_ratio": 0.0, "quality": "Unknown", "high_quality": False}
 
 
-def get_market_regime(ticker: str, period: str = "3y", n_states: int = 3):
+def get_market_regime(ticker: str, period: str = "5y", n_states: int = 3):
     """Hidden Markov Model (HMM) for market regime detection.
     Detects Bull/Neutral/Bear regimes based on returns.
     High impact for adaptive trading and risk management."""
@@ -285,7 +285,7 @@ def get_market_regime(ticker: str, period: str = "3y", n_states: int = 3):
     except Exception as e:
         return {"regime": "Neutral", "probs": [0.33, 0.34, 0.33], "means": [0.0, 0.0, 0.0]}
 
-def get_garch_forecast(ticker: str, period: str = "2y", horizon: int = 5):
+def get_garch_forecast(ticker: str, period: str = "5y", horizon: int = 5):
     """GARCH(1,1) volatility forecast.
     Provides forward-looking volatility for better Monte Carlo and risk sizing.
     High impact for accurate risk management."""
@@ -474,7 +474,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80,
         return {"error": "torch not installed", "direction": "Neutral", "signal_strength": 0.0}
     device = _gpu_device()
     try:
-        hist   = yf.Ticker(ticker).history(period="3y")
+        hist   = yf.Ticker(ticker).history(period="5y")
         closes = hist['Close'].dropna()
         returns = closes.pct_change().dropna().values.astype(np.float32)
         if len(returns) <= seq_len:
@@ -545,7 +545,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
 
 
 def _nf_forecast(ticker: str, ModelClass, model_name: str,
-                 prediction_length: int = 5, input_size: int = 48,
+                 prediction_length: int = 5, input_size: int = 120,
                  epochs: int = 50, extra_kwargs: dict = None):
     """Shared NeuralForecast training loop for NHITS / TFT / PatchTST."""
     if not _NF_AVAILABLE:
@@ -554,7 +554,7 @@ def _nf_forecast(ticker: str, ModelClass, model_name: str,
     if _TORCH_AVAILABLE and device == 'cuda':
         torch.set_float32_matmul_precision('high')
     try:
-        hist = yf.Ticker(ticker).history(period="3y")
+        hist = yf.Ticker(ticker).history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient history", "direction": "Neutral"}
         df = pd.DataFrame({"unique_id": "stock",
@@ -582,18 +582,18 @@ def _nf_forecast(ticker: str, ModelClass, model_name: str,
 
 
 def get_nhits_forecast(ticker: str, prediction_length: int = 5,
-                       input_size: int = 48, epochs: int = 50):
+                       input_size: int = 120, epochs: int = 50):
     return _nf_forecast(ticker, NHITS, "NHITS", prediction_length, input_size, epochs)
 
 
 def get_tft_forecast(ticker: str, prediction_length: int = 5,
-                     input_size: int = 48, epochs: int = 50):
+                     input_size: int = 120, epochs: int = 50):
     return _nf_forecast(ticker, TFT, "TFT", prediction_length, input_size, epochs,
                         extra_kwargs={"hidden_size": 128, "n_head": 4})
 
 
 def get_patchtst_forecast(ticker: str, prediction_length: int = 5,
-                          input_size: int = 48, epochs: int = 50):
+                          input_size: int = 120, epochs: int = 50):
     return _nf_forecast(ticker, PatchTST, "PatchTST", prediction_length, input_size, epochs,
                         extra_kwargs={"hidden_size": 128, "n_heads": 4})
 

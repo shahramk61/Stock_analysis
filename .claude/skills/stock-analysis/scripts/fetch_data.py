@@ -164,7 +164,7 @@ def get_beta_decomposition(stock_hist, sector, period_days=504):
         tickers    = ['SPY'] if sector_etf == 'SPY' else ['SPY', sector_etf]
 
         # Fetch benchmark data (2-year window)
-        bench = yf.download(tickers, period='2y', progress=False, auto_adjust=True)['Close']
+        bench = yf.download(tickers, period='5y', progress=False, auto_adjust=True)['Close']
         if bench.empty:
             return None
 
@@ -303,7 +303,7 @@ def get_earnings_history(stock, hist, n_quarters=8):
         return None
 
 
-def fetch_stock_data(ticker: str, period="2y"):
+def fetch_stock_data(ticker: str, period="5y"):
     stock = yf.Ticker(ticker)
     info = stock.info
     hist = stock.history(period=period)

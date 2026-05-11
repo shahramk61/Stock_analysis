@@ -110,7 +110,7 @@ def get_monte_carlo_risk(ticker: str, paths: int = 10000, horizon_days: int = 25
     """
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"var_95": 20.0, "cvar_95": 28.0, "simulated_annual_vol": 35.0, "annual_drift": 8.0}
         
@@ -175,7 +175,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
     
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"predicted_next_return_pct": 0.5, "direction": "Neutral", "signal_strength": 5.0, "device": device, "note": "Insufficient data"}
         
@@ -412,7 +412,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
         }
 
 
-def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     SOTA neural time-series forecasting using NHITS (Neural Hierarchical Interpolation for Time Series)
     via NeuralForecast library — one of the top-performing DL models for forecasting (often beats N-BEATS, TFT, etc.).
@@ -431,7 +431,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
             torch.set_float32_matmul_precision('high')  # optional speedup on modern GPUs
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for NHITS forecasting"}
 
@@ -487,7 +487,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         return {"error": str(e)[:150]}
 
 
-def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     Temporal Fusion Transformer (TFT) via NeuralForecast — SOTA attention-based model for interpretable multi-horizon forecasting.
     Excellent at incorporating covariates and providing uncertainty via quantiles (we use point for consistency here).
@@ -506,7 +506,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for TFT forecasting"}
 
@@ -587,7 +587,7 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
     }
 
 
-def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     PatchTST (Patch Time Series Transformer) via NeuralForecast — one of the most powerful SOTA models for long-term time series forecasting (2024+ benchmarks often rank it top-tier).
     Uses patching mechanism for efficient transformer attention on time series patches. Excellent at capturing both local patterns and global dependencies. Complements NHITS (hierarchical) and TFT (attention with covariates) perfectly.
@@ -605,7 +605,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for PatchTST forecasting"}
 
