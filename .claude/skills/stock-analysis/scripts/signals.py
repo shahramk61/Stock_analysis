@@ -783,18 +783,36 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
             daily_median = [round(float(np.median([d[i] for d in all_daily])), 3) for i in range(n_days)]
             daily_avg    = [round(float(np.mean([d[i] for d in all_daily])), 3) for i in range(n_days)]
 
+            # Projected prices and real business-day calendar dates
+            daily_prices = [round(float(last_price) * (1 + r / 100), 2) for r in daily_median]
+            per_model_daily_prices = {
+                n: [round(float(last_price) * (1 + r / 100), 2) for r in rets]
+                for n, rets in model_daily_preds.items()
+            }
+            forecast_dates = [
+                str(d.date())
+                for d in pd.bdate_range(
+                    start=pd.Timestamp.today() + pd.Timedelta(days=1),
+                    periods=len(daily_median)
+                )
+            ]
+
             results[f"{h}d"] = {
-                "predicted_return_pct": avg_ret,
-                "avg_return_pct":       avg_ret,
-                "median_return_pct":    median_ret,
-                "direction":            direction,
-                "model_disagreement":   std_dev,
-                "num_models":           len(model_preds),
-                "per_model":            {n: round(r, 2) for n, r in model_preds_named},
-                "model_predictions":    {n: round(r, 2) for n, r in model_preds_named},
-                "daily_forecasts":      daily_median,
-                "daily_avg_forecasts":  daily_avg,
-                "per_model_daily":      model_daily_preds,
+                "predicted_return_pct":    avg_ret,
+                "avg_return_pct":          avg_ret,
+                "median_return_pct":       median_ret,
+                "direction":               direction,
+                "model_disagreement":      std_dev,
+                "num_models":              len(model_preds),
+                "per_model":               {n: round(r, 2) for n, r in model_preds_named},
+                "model_predictions":       {n: round(r, 2) for n, r in model_preds_named},
+                "daily_forecasts":         daily_median,
+                "daily_avg_forecasts":     daily_avg,
+                "daily_prices":            daily_prices,
+                "per_model_daily":         model_daily_preds,
+                "per_model_daily_prices":  per_model_daily_prices,
+                "forecast_dates":          forecast_dates,
+                "last_price":              round(float(last_price), 2),
             }
 
         valid_rets = [results[f"{h}d"]["predicted_return_pct"]

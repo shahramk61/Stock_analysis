@@ -107,6 +107,9 @@ st.title("📊 Stock Analysis Dashboard")
 
 # Persist analysis results across reruns (radio clicks, expanders, etc.)
 if run_btn:
+    st.session_state.pop('results', None)   # clear any stale cache
+    st.session_state['ready'] = False
+    run_analysis.clear()                    # clear @st.cache_data
     with st.spinner(f"Analyzing {ticker}... (GPU signals may take 2-3 min)"):
         try:
             data, scores, mc12, mc36 = run_analysis(ticker, profile, use_gpu)
@@ -358,9 +361,7 @@ if st.session_state.get('ready'):
                 # ── Daily time-series chart
                 fig_daily = go.Figure()
                 for m in MODEL_NAMES:
-                    y_m = (pm_px.get(m) or pm_d.get(m)) if use_price else pm_d.get(m)
-                    if not use_price:
-                        y_m = pm_d.get(m)
+                    y_m = pm_px.get(m) if use_price else pm_d.get(m)
                     if y_m:
                         fig_daily.add_trace(go.Scatter(
                             x=x_vals[:len(y_m)], y=y_m,
@@ -373,6 +374,8 @@ if st.session_state.get('ready'):
                                 + "<extra></extra>"
                             ),
                         ))
+                if use_price and not daily_px:
+                    st.warning("Price data not available — click **Run Analysis** again to refresh.")
                 y_med = daily_px if use_price else daily
                 if y_med:
                     fig_daily.add_trace(go.Scatter(
