@@ -438,7 +438,7 @@ except ImportError:
 
 try:
     from neuralforecast import NeuralForecast
-    from neuralforecast.models import NHITS, TFT, PatchTST
+    from neuralforecast.models import NHITS, TFT, PatchTST, NBEATS, TCN
     from neuralforecast.losses.pytorch import MAE
     _NF_AVAILABLE = True
 except ImportError:
@@ -598,22 +598,37 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5,
                         extra_kwargs={"hidden_size": 128, "n_heads": 4})
 
 
+def get_nbeats_forecast(ticker: str, prediction_length: int = 5,
+                        input_size: int = 120, epochs: int = 50):
+    """N-BEATS — interpretable SOTA model (trend + seasonality + residual stacks)."""
+    return _nf_forecast(ticker, NBEATS, "NBEATS", prediction_length, input_size, epochs)
+
+
+def get_tcn_forecast(ticker: str, prediction_length: int = 5,
+                     input_size: int = 120, epochs: int = 50):
+    """TCN — fast dilated causal convolutions, excellent for long-range dependencies."""
+    return _nf_forecast(ticker, TCN, "TCN", prediction_length, input_size, epochs,
+                        extra_kwargs={"hidden_size": 128})
+
+
 def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
-    """NHITS + TFT + PatchTST ensemble forecast. Uses GPU for all three models."""
+    """5-model ensemble: NHITS + TFT + PatchTST + N-BEATS + TCN. All GPU-accelerated."""
     results = {}
     preds   = []
-    for name, fn in [("nhits", get_nhits_forecast),
-                     ("tft",   get_tft_forecast),
-                     ("patchtst", get_patchtst_forecast)]:
+    for name, fn in [("nhits",    get_nhits_forecast),
+                     ("tft",      get_tft_forecast),
+                     ("patchtst", get_patchtst_forecast),
+                     ("nbeats",   get_nbeats_forecast),
+                     ("tcn",      get_tcn_forecast)]:
         r = fn(ticker, prediction_length=prediction_length)
         results[name] = r
         if "predicted_5d_return_pct" in r:
             preds.append(r["predicted_5d_return_pct"])
     if not preds:
         return {"error": "All ensemble models failed", "direction": "Neutral"}
-    ensemble = round(sum(preds) / len(preds), 2)
+    ensemble    = round(sum(preds) / len(preds), 2)
     uncertainty = round((max(preds) - min(preds)) / 2, 2)
-    direction = "Bullish" if ensemble > 1 else ("Bearish" if ensemble < -1 else "Neutral")
+    direction   = "Bullish" if ensemble > 1 else ("Bearish" if ensemble < -1 else "Neutral")
     return {"predicted_5d_return_pct": ensemble,
             "direction": direction,
             "uncertainty_pct": uncertainty,

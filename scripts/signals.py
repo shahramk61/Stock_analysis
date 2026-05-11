@@ -83,7 +83,7 @@ def get_earnings_surprise(ticker: str):
     except:
         return {"avg_surprise_pct": 0.0, "post_earnings_drift": 0.0}
 
-def get_rolling_beta(ticker: str, period="2y"):
+def get_rolling_beta(ticker: str, period="5y"):
     stock = yf.Ticker(ticker)
     spy = yf.Ticker("SPY")
     try:
@@ -110,7 +110,7 @@ def get_monte_carlo_risk(ticker: str, paths: int = 10000, horizon_days: int = 25
     """
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"var_95": 20.0, "cvar_95": 28.0, "simulated_annual_vol": 35.0, "annual_drift": 8.0}
         
@@ -175,7 +175,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
     
     stock = yf.Ticker(ticker)
     try:
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"predicted_next_return_pct": 0.5, "direction": "Neutral", "signal_strength": 5.0, "device": device, "note": "Insufficient data"}
         
@@ -226,7 +226,7 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
         with torch.no_grad():
             pred_return = model(last_seq).item()
         
-        direction = "Bullish 📈" if pred_return > 0.005 else "Bearish 📉" if pred_return < -0.005 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 0.005 else "Bearish" if pred_return < -0.005 else "Neutral"
         strength = min(abs(pred_return) * 200, 100)  # scale to 0-100
         
         return {
@@ -282,7 +282,7 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5):
         pred_median = q50[-1]
         pred_return = (pred_median - last_price) / last_price * 100
         
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
         
         uncertainty = (q90[-1] - q10[-1]) / last_price * 100
         
@@ -412,7 +412,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
         }
 
 
-def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     SOTA neural time-series forecasting using NHITS (Neural Hierarchical Interpolation for Time Series)
     via NeuralForecast library — one of the top-performing DL models for forecasting (often beats N-BEATS, TFT, etc.).
@@ -431,7 +431,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
             torch.set_float32_matmul_precision('high')  # optional speedup on modern GPUs
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for NHITS forecasting"}
 
@@ -460,7 +460,8 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         )
 
         nf = NeuralForecast(models=[model], freq="B")  # business days
-        nf.fit(df=df, val_size=0.1)
+        val_size = max(prediction_length, int(len(df) * 0.1))
+        nf.fit(df=df, val_size=val_size)
 
         # Predict
         preds = nf.predict()
@@ -470,7 +471,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         pred_return = (pred_median - last_price) / last_price * 100
 
         # For simplicity, use point forecast; could add quantiles but NHITS default is point
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -487,7 +488,7 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
         return {"error": str(e)[:150]}
 
 
-def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     Temporal Fusion Transformer (TFT) via NeuralForecast — SOTA attention-based model for interpretable multi-horizon forecasting.
     Excellent at incorporating covariates and providing uncertainty via quantiles (we use point for consistency here).
@@ -506,7 +507,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for TFT forecasting"}
 
@@ -533,7 +534,8 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         )
 
         nf = NeuralForecast(models=[model], freq="B")
-        nf.fit(df=df, val_size=0.1)
+        val_size = max(prediction_length, int(len(df) * 0.1))
+        nf.fit(df=df, val_size=val_size)
 
         preds = nf.predict()
         pred_median = preds["TFT"].values[0]
@@ -541,7 +543,7 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -575,7 +577,7 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
         return {"error": "All ensemble models failed", "direction": "Neutral"}
     ensemble = round(sum(preds) / len(preds), 2)
     uncertainty = round((max(preds) - min(preds)) / 2, 2)
-    direction = "Bullish 📈" if ensemble > 1 else ("Bearish 📉" if ensemble < -1 else "Neutral ➕")
+    direction = "Bullish" if ensemble > 1 else ("Bearish" if ensemble < -1 else "Neutral")
     return {
         "predicted_5d_return_pct": ensemble,
         "direction": direction,
@@ -587,7 +589,7 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
     }
 
 
-def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     PatchTST (Patch Time Series Transformer) via NeuralForecast — one of the most powerful SOTA models for long-term time series forecasting (2024+ benchmarks often rank it top-tier).
     Uses patching mechanism for efficient transformer attention on time series patches. Excellent at capturing both local patterns and global dependencies. Complements NHITS (hierarchical) and TFT (attention with covariates) perfectly.
@@ -605,7 +607,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for PatchTST forecasting"}
 
@@ -632,7 +634,8 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
         )
 
         nf = NeuralForecast(models=[model], freq="B")
-        nf.fit(df=df, val_size=0.1)
+        val_size = max(prediction_length, int(len(df) * 0.1))
+        nf.fit(df=df, val_size=val_size)
 
         preds = nf.predict()
         pred_median = preds["PatchTST"].values[0]
@@ -640,7 +643,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -657,7 +660,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
         return {"error": str(e)[:150]}
 
 
-def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     N-BEATS via NeuralForecast — classic interpretable SOTA model.
     Excellent at decomposing forecasts into trend + seasonality + residual stacks.
@@ -670,13 +673,14 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import NBEATS
+        from neuralforecast.losses.pytorch import MAE as NFLoss
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for N-BEATS forecasting"}
 
@@ -701,7 +705,8 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int
         )
 
         nf = NeuralForecast(models=[model], freq="B")
-        nf.fit(df=df, val_size=0.1)
+        val_size = max(prediction_length, int(len(df) * 0.1))
+        nf.fit(df=df, val_size=val_size)
 
         preds = nf.predict()
         pred_median = preds["NBEATS"].values[0]
@@ -709,7 +714,7 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),
@@ -726,7 +731,7 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int
         return {"error": str(e)[:150]}
 
 
-def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 48, epochs: int = 50):
+def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
     """
     TCN (Temporal Convolutional Network) via NeuralForecast.
     Extremely fast on GPU thanks to dilated causal convolutions.
@@ -739,13 +744,14 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         import numpy as np
         from neuralforecast import NeuralForecast
         from neuralforecast.models import TCN
+        from neuralforecast.losses.pytorch import MAE as NFLoss
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda":
             torch.set_float32_matmul_precision('high')
 
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3y")
+        hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"error": "Insufficient price history for TCN forecasting"}
 
@@ -771,7 +777,8 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         )
 
         nf = NeuralForecast(models=[model], freq="B")
-        nf.fit(df=df, val_size=0.1)
+        val_size = max(prediction_length, int(len(df) * 0.1))
+        nf.fit(df=df, val_size=val_size)
 
         preds = nf.predict()
         pred_median = preds["TCN"].values[0]
@@ -779,7 +786,7 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
         last_price = hist["Close"].iloc[-1]
         pred_return = (pred_median - last_price) / last_price * 100
 
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
 
         return {
             "predicted_5d_return_pct": round(pred_return, 2),

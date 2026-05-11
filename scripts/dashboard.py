@@ -276,7 +276,7 @@ if run_btn:
                 comps = dl.get('components',{})
                 if comps:
                     st.markdown("**Model breakdown:**")
-                    model_names = {"nhits": "NHITS", "tft": "TFT", "patchtst": "PatchTST"}
+                    model_names = {"nhits": "NHITS", "tft": "TFT", "patchtst": "PatchTST", "nbeats": "N-BEATS", "tcn": "TCN"}
                     for nm, label in model_names.items():
                         r = comps.get(nm, {})
                         if 'predicted_5d_return_pct' in r:

@@ -36,7 +36,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
 
     # ── GPU signals (with CPU fallback) ──────────────────────────────────────
     gpu = gpu_available()
-    print(f"{'🖥️  Running GPU signals (LSTM, FinBERT, NHITS+TFT+PatchTST Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
+    print(f"{'🖥️  Running GPU signals (LSTM, FinBERT, NHITS+TFT+PatchTST+N-BEATS+TCN Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
 
     lstm        = get_lstm_forecast(ticker)
     finbert     = get_finbert_sentiment(ticker)
