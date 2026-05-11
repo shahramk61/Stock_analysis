@@ -24,14 +24,17 @@ def main():
                         choices=["Balanced", "Growth", "Value", "Momentum"])
     parser.add_argument("--output",  default="both",
                         choices=["report", "json", "both"])
+    parser.add_argument("--dynamic-weights", action="store_true",
+                        help="Compute dynamic ensemble weights from out-of-sample backtest (~2x slower)")
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
-    print(f"🔍 Analyzing {ticker} with {args.profile} profile...\n")
+    print(f"🔍 Analyzing {ticker} with {args.profile} profile" +
+          (" + dynamic weights" if args.dynamic_weights else "") + "...\n")
 
     data   = fetch_stock_data(ticker)
     data['dcf'] = calculate_dcf(data)
-    scores = calculate_pillars(data, args.profile)
+    scores = calculate_pillars(data, args.profile, compute_dynamic_weights=args.dynamic_weights)
 
     vol   = data.get('annual_vol', data['info'].get('beta', 1.0) * 25)
     mc    = run_monte_carlo(data['current_price'], vol, scores['overall'], days=252)

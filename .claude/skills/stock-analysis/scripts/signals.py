@@ -734,11 +734,33 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
             "device_used": results.get("nhits", {}).get("device_used", "cpu")}
 
 
-def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
+# Static prior weights for ensemble (must sum to 1.0; renormalized over available models)
+STATIC_MODEL_WEIGHTS = {
+    "NHITS":    0.20,
+    "TFT":      0.18,
+    "PatchTST": 0.13,
+    "NBEATS":   0.17,
+    "TCN":      0.07,
+    "LSTM":     0.10,
+    "Chronos":  0.15,
+}
+
+
+def _weighted_mean(pairs, weights):
+    avail = [(n, v) for n, v in pairs if n in weights]
+    if not avail:
+        return None
+    total_w = sum(weights[n] for n, _ in avail)
+    if total_w <= 0:
+        return None
+    return sum(v * weights[n] for n, v in avail) / total_w
+
+
+def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dynamic_weights: bool = False):
     """
-    Multi-horizon ensemble forecast (5d/10d/15d/20d) using all 5 NeuralForecast models.
-    Returns predicted return, direction, and model disagreement per horizon,
-    plus a trend acceleration signal useful for trading bots.
+    Multi-horizon ensemble forecast (5d/10d/15d/20d/50d) using 7 models:
+    NHITS + TFT + PatchTST + N-BEATS + TCN + LSTM + Chronos-2.
+    Returns median, avg, static-weighted, optionally dynamic-weighted predictions per horizon.
     """
     if horizons is None:
         horizons = [5, 10, 15, 20, 50]
@@ -824,6 +846,8 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
             avg_ret    = round(float(np.mean(model_preds)), 2)
             median_ret = round(float(np.median(model_preds)), 2)
             std_dev    = round(float(np.std(model_preds)), 2)
+            wm_static  = _weighted_mean(model_preds_named, STATIC_MODEL_WEIGHTS)
+            wm_static_rounded = round(wm_static, 2) if wm_static is not None else None
             direction  = ("Bullish" if avg_ret > 1.5 else
                           "Bearish" if avg_ret < -1.5 else "Neutral")
 
@@ -850,6 +874,8 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                 "predicted_return_pct":    avg_ret,
                 "avg_return_pct":          avg_ret,
                 "median_return_pct":       median_ret,
+                "weighted_static_pct":     wm_static_rounded,
+                "weighted_dynamic_pct":    None,   # not computed in skills pipeline
                 "direction":               direction,
                 "model_disagreement":      std_dev,
                 "num_models":              len(model_preds),

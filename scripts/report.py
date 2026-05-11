@@ -68,19 +68,24 @@ def generate_report(data, scores, mc_result, profile):
     if "error" not in ensemble:
         print(f"• Ensemble (NHITS+TFT+PatchTST): {ensemble.get('predicted_return_pct', ensemble.get('predicted_5d_return_pct', 0))}% (5d) | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}%")
     
-    # === MULTI-HORIZON DAILY FORECASTS (v4.11) ===
+    # === MULTI-HORIZON DAILY FORECASTS (v4.24: 7-model ensemble + 4 aggregation methods) ===
     multi = signals.get('multi_horizon_forecasts', {})
     if "error" not in multi and "horizons" in multi:
         model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN", "LSTM", "Chronos"]
-        W = 110
+        W = 140
 
         print(f"\n{'='*W}")
-        print(f"📅 Multi-Horizon Daily Forecasts (Day-by-Day) — 5 SOTA Models")
+        print(f"📅 Multi-Horizon Daily Forecasts (Day-by-Day) — 7 SOTA Models")
         print(f"{'='*W}")
 
-        # Summary table
-        print(f"\n{'Horizon':<7} {'Median%':<9} {'Avg%':<8} {'Direction':<14} {'±Uncert':<9} " +
-              "  ".join(f"{m:<9}" for m in model_names))
+        # ── Ensemble summary table (Median / Avg / Static-weighted / Dynamic-weighted)
+        has_dyn = any(multi["horizons"].get(h, {}).get("weighted_dynamic_pct") is not None
+                      for h in ["5d", "10d", "15d", "20d", "50d"])
+        hdr = f"{'Horizon':<7} {'Median%':<9} {'Avg%':<8} {'WgtStat%':<9}"
+        if has_dyn:
+            hdr += f" {'WgtDyn%':<9}"
+        hdr += f" {'Direction':<14} {'±Uncert':<9} " + "  ".join(f"{m:<9}" for m in model_names)
+        print(f"\n{hdr}")
         print("-" * W)
         for h in ["5d", "10d", "15d", "20d", "50d"]:
             hd = multi["horizons"].get(h, {})
@@ -90,13 +95,30 @@ def generate_report(data, scores, mc_result, profile):
             pm = hd.get("per_model", {})
             tcn = pm.get("TCN", 0)
             outlier = " ⚠️TCN" if abs(tcn) > 3.0 else ""
-            print(f"{h:<7} {hd.get('median_return_pct', 0):>+7.2f}%  "
-                  f"{hd.get('avg_return_pct', 0):>+7.2f}%  "
-                  f"{hd.get('direction', 'N/A'):<14} "
-                  f"±{hd.get('model_disagreement', 0):>5.2f}%  " +
-                  "  ".join(f"{pm.get(m, 0):>+7.2f}%" for m in model_names) + outlier)
+            wm_s = hd.get("weighted_static_pct")
+            wm_d = hd.get("weighted_dynamic_pct")
+            line  = f"{h:<7} {hd.get('median_return_pct', 0):>+7.2f}%  "
+            line += f"{hd.get('avg_return_pct', 0):>+7.2f}%  "
+            line += f"{wm_s if wm_s is not None else 0:>+7.2f}%  "
+            if has_dyn:
+                line += f"{wm_d if wm_d is not None else 0:>+7.2f}%  "
+            line += f"{hd.get('direction', 'N/A'):<14} "
+            line += f"±{hd.get('model_disagreement', 0):>5.2f}%  "
+            line += "  ".join(f"{pm.get(m, 0):>+7.2f}%" for m in model_names) + outlier
+            print(line)
         print("-" * W)
         print(f"Trend: {multi.get('trend_signal','N/A')}  |  Consensus: {multi.get('consensus_direction','N/A')}")
+
+        # Print weight details
+        sw = multi.get("static_weights", {})
+        if sw:
+            print(f"\nStatic weights:  " + "  ".join(f"{n}={w}" for n, w in sw.items()))
+        dwi = multi.get("dynamic_weights_info")
+        if dwi:
+            dw = dwi.get("weights", {})
+            de = dwi.get("errors_mae", {})
+            print(f"Dynamic weights (val_h={dwi.get('val_h')}):  " + "  ".join(f"{n}={w}" for n, w in dw.items()))
+            print(f"Dynamic MAE:   " + "  ".join(f"{n}={e}%" for n, e in de.items()))
 
         # Day-by-day breakdown per horizon
         for h in ["5d", "10d", "15d", "20d", "50d"]:

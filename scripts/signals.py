@@ -388,7 +388,140 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
             "device_used": results.get("nhits", {}).get("device_used", "cpu")}
 
 
-def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
+# Static prior weights for ensemble — based on observed reliability across runs.
+# Must sum to 1.0. Renormalized at use time if some models fail.
+STATIC_MODEL_WEIGHTS = {
+    "NHITS":    0.20,
+    "TFT":      0.18,
+    "PatchTST": 0.13,
+    "NBEATS":   0.17,
+    "TCN":      0.07,
+    "LSTM":     0.10,
+    "Chronos":  0.15,
+}
+
+
+def _weighted_mean(pairs, weights):
+    """Compute weighted mean of (name, value) pairs using `weights` dict.
+    Renormalizes over available models. Returns None if no overlap."""
+    avail = [(n, v) for n, v in pairs if n in weights]
+    if not avail:
+        return None
+    total_w = sum(weights[n] for n, _ in avail)
+    if total_w <= 0:
+        return None
+    return sum(v * weights[n] for n, v in avail) / total_w
+
+
+def _compute_dynamic_weights(ticker: str, val_h: int = 10):
+    """Backtest: train each model on history[:-val_h], predict val_h days, compute MAE
+    of predicted vs actual cumulative returns. Weight = 1/MAE normalized.
+    Returns dict {weights: {...}, errors_mae: {...}, val_h: int} or None on failure."""
+    if not _NF_AVAILABLE:
+        return None
+    try:
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < val_h + 200:
+            return None
+        closes_arr = hist['Close'].values
+        actual_prices = closes_arr[-val_h:]
+        train_end_price = float(closes_arr[-val_h - 1])
+        actual_cum = np.array([(float(p) - train_end_price) / train_end_price * 100 for p in actual_prices])
+        train_hist = hist.iloc[:-val_h]
+        train_closes_series = train_hist['Close'].dropna()
+        train_returns = train_closes_series.pct_change().dropna().values.astype(np.float32)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            torch.set_float32_matmul_precision('high')
+
+        errors = {}
+
+        # LSTM backtest
+        try:
+            seq_len = 40
+            if len(train_returns) > seq_len + val_h:
+                X_list, y_list = [], []
+                for i in range(len(train_returns) - seq_len - val_h + 1):
+                    X_list.append(train_returns[i:i + seq_len])
+                    y_list.append(train_returns[i + seq_len: i + seq_len + val_h])
+                X = torch.tensor(np.array(X_list), dtype=torch.float32).unsqueeze(-1)
+                y = torch.tensor(np.array(y_list), dtype=torch.float32)
+                train_size = int(len(X) * 0.9)
+                mdl = LSTMForecaster(hidden_size=128, num_layers=2, output_size=val_h).to(device)
+                crit = nn.MSELoss()
+                opt = torch.optim.AdamW(mdl.parameters(), lr=0.001, weight_decay=1e-5)
+                dataset = TensorDataset(X[:train_size], y[:train_size])
+                loader = DataLoader(dataset, batch_size=64, shuffle=True, drop_last=True)
+                mdl.train()
+                for _ in range(50):
+                    for xb, yb in loader:
+                        xb, yb = xb.to(device), yb.to(device)
+                        loss = crit(mdl(xb), yb)
+                        opt.zero_grad(); loss.backward(); opt.step()
+                mdl.eval()
+                curr = torch.tensor(train_returns[-seq_len:], dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
+                with torch.no_grad():
+                    raw = mdl(curr).cpu().numpy().flatten()
+                inc_pred = [float(max(min(p, 0.06), -0.06)) for p in raw]
+                pred_cum = np.cumsum([p * 100 for p in inc_pred])
+                errors["LSTM"] = float(np.mean(np.abs(actual_cum - pred_cum)))
+        except Exception:
+            pass
+
+        # Chronos backtest
+        try:
+            from chronos import Chronos2Pipeline
+            pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device)
+            context = train_closes_series.values[-100:].tolist()
+            try:
+                forecast = pipeline.predict(context, prediction_length=val_h, quantile_levels=[0.5])
+                q50_arr = np.atleast_1d(forecast[0].cpu().numpy())
+            except TypeError:
+                ctx_t = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+                samples = pipeline.predict(ctx_t, prediction_length=val_h)
+                q50_arr = np.percentile(samples[0].squeeze(0).cpu().numpy(), 50, axis=0)
+            pred_cum = np.array([(float(p) - train_end_price) / train_end_price * 100 for p in q50_arr])
+            errors["Chronos"] = float(np.mean(np.abs(actual_cum - pred_cum)))
+        except Exception:
+            pass
+
+        # NeuralForecast models backtest
+        df_train = pd.DataFrame({"unique_id": "stock",
+                                 "ds": train_hist.index.tz_localize(None),
+                                 "y": train_hist["Close"].values})
+        for ModelClass, name, extra in [
+            (NHITS,    "NHITS",    {}),
+            (TFT,      "TFT",      {"hidden_size": 128, "n_head": 4}),
+            (PatchTST, "PatchTST", {"hidden_size": 128, "n_heads": 4}),
+            (NBEATS,   "NBEATS",   {}),
+            (TCN,      "TCN",      {}),
+        ]:
+            try:
+                kwargs = dict(h=val_h, input_size=120, max_steps=30, learning_rate=0.001,
+                              loss=MAE(), valid_loss=MAE(), early_stop_patience_steps=8,
+                              batch_size=32, windows_batch_size=512, random_seed=42)
+                kwargs.update(extra)
+                nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
+                nf.fit(df=df_train, val_size=max(val_h, int(len(df_train) * 0.1)))
+                pred_prices = nf.predict()[name].values
+                pred_cum = np.array([(float(p) - train_end_price) / train_end_price * 100 for p in pred_prices])
+                errors[name] = float(np.mean(np.abs(actual_cum - pred_cum)))
+            except Exception:
+                continue
+
+        if not errors:
+            return None
+        inv = {n: 1.0 / max(e, 0.5) for n, e in errors.items()}
+        total = sum(inv.values())
+        weights = {n: round(v / total, 4) for n, v in inv.items()}
+        return {"weights": weights,
+                "errors_mae": {n: round(e, 3) for n, e in errors.items()},
+                "val_h": val_h}
+    except Exception:
+        return None
+
+
+def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dynamic_weights: bool = False):
     if horizons is None:
         horizons = [5, 10, 15, 20, 50]
     if not _NF_AVAILABLE:
@@ -405,6 +538,11 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                            "y": hist["Close"].values})
         last_price = float(hist["Close"].iloc[-1])
         results = {}
+
+        # Compute dynamic weights (once per analysis, applied to all horizons)
+        dynamic_weights_info = None
+        if compute_dynamic_weights:
+            dynamic_weights_info = _compute_dynamic_weights(ticker, val_h=10)
 
         for h in horizons:
             model_preds, model_preds_named, model_daily_preds = [], [], {}
@@ -468,6 +606,14 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
             avg_ret    = round(float(np.mean(model_preds)), 2)
             median_ret = round(float(np.median(model_preds)), 2)
             std_dev    = round(float(np.std(model_preds)), 2)
+            # Weighted means
+            wm_static  = _weighted_mean(model_preds_named, STATIC_MODEL_WEIGHTS)
+            wm_dynamic = None
+            if dynamic_weights_info and dynamic_weights_info.get("weights"):
+                wm_dynamic = _weighted_mean(model_preds_named, dynamic_weights_info["weights"])
+            wm_static_rounded  = round(wm_static, 2) if wm_static is not None else None
+            wm_dynamic_rounded = round(wm_dynamic, 2) if wm_dynamic is not None else None
+
             direction  = "Bullish 📈" if avg_ret > 1.5 else ("Bearish 📉" if avg_ret < -1.5 else "Neutral ➕")
             all_daily  = list(model_daily_preds.values())
             n_days     = min(len(d) for d in all_daily) if all_daily else 0
@@ -480,15 +626,23 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                 start=pd.Timestamp.today() + pd.Timedelta(days=1), periods=len(daily_median))]
 
             results[f"{h}d"] = {
-                "predicted_return_pct": avg_ret, "avg_return_pct": avg_ret,
-                "median_return_pct": median_ret, "direction": direction,
-                "model_disagreement": std_dev, "num_models": len(model_preds),
-                "per_model": {n: round(r, 2) for n, r in model_preds_named},
-                "model_predictions": {n: round(r, 2) for n, r in model_preds_named},
-                "daily_forecasts": daily_median, "daily_avg_forecasts": daily_avg,
-                "daily_prices": daily_prices, "per_model_daily": model_daily_preds,
+                "predicted_return_pct":   avg_ret,
+                "avg_return_pct":         avg_ret,
+                "median_return_pct":      median_ret,
+                "weighted_static_pct":    wm_static_rounded,
+                "weighted_dynamic_pct":   wm_dynamic_rounded,
+                "direction":              direction,
+                "model_disagreement":     std_dev,
+                "num_models":             len(model_preds),
+                "per_model":              {n: round(r, 2) for n, r in model_preds_named},
+                "model_predictions":      {n: round(r, 2) for n, r in model_preds_named},
+                "daily_forecasts":        daily_median,
+                "daily_avg_forecasts":    daily_avg,
+                "daily_prices":           daily_prices,
+                "per_model_daily":        model_daily_preds,
                 "per_model_daily_prices": per_model_daily_prices,
-                "forecast_dates": forecast_dates, "last_price": round(last_price, 2),
+                "forecast_dates":         forecast_dates,
+                "last_price":             round(last_price, 2),
             }
 
         valid_rets = [results[f"{h}d"]["predicted_return_pct"] for h in horizons
@@ -500,6 +654,11 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
         consensus = max(set(dirs), key=dirs.count) if dirs else "Neutral"
         return {"horizons": results, "consensus_direction": consensus,
                 "trend_signal": trend, "device_used": device,
-                "model": "Multi-Horizon (NHITS+TFT+PatchTST+N-BEATS+TCN)"}
+                "model": "Multi-Horizon (NHITS+TFT+PatchTST+N-BEATS+TCN+LSTM+Chronos)",
+                "static_weights": STATIC_MODEL_WEIGHTS,
+                "dynamic_weights_info": dynamic_weights_info,
+                "ensemble_methods": ["median", "avg", "weighted_static",
+                                     "weighted_dynamic" if dynamic_weights_info else None],
+                }
     except Exception as e:
         return {"error": str(e)[:150], "horizons": {}}

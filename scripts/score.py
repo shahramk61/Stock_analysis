@@ -15,7 +15,7 @@ from signals import (
 )
 from dcf import calculate_dcf
 
-def calculate_pillars(data: dict, profile: str = "Balanced"):
+def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False):
     ticker = data['ticker']
     info   = data['info']
 
@@ -31,7 +31,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     patchtst_forecast = get_patchtst_forecast(ticker)
     ensemble_forecast = get_nhits_tft_patchtst_ensemble(ticker)
     sentiment_signal  = get_finbert_sentiment(ticker)
-    multi_horizon     = get_multi_horizon_forecasts(ticker)
+    multi_horizon     = get_multi_horizon_forecasts(ticker, compute_dynamic_weights=compute_dynamic_weights)
 
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
