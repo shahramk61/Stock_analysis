@@ -7,7 +7,7 @@ from signals import (get_iv_rank_and_skew, calculate_altman_beneish, get_earning
                      get_simple_formulaic_alpha, get_obv, get_chaikin_money_flow,
                      get_monte_carlo_risk,
                      get_lstm_forecast, get_chronos_forecast, get_finbert_sentiment,
-                     get_nhits_tft_patchtst_ensemble)
+                     get_nhits_tft_patchtst_ensemble, get_multi_horizon_forecasts)
 from dcf import calculate_dcf
 from gpu_utils import gpu_available
 
@@ -45,6 +45,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     chronos     = get_chronos_forecast(ticker)
     finbert     = get_finbert_sentiment(ticker)
     dl_ensemble = get_nhits_tft_patchtst_ensemble(ticker)
+    multi_h     = get_multi_horizon_forecasts(ticker)
 
     # ── Pillar scoring ───────────────────────────────────────────────────────
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
@@ -133,7 +134,8 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "momentum": momentum, "quality": quality, "amihud": amihud,
             "turnover": turnover, "vol_price": vol_price,
             "formulaic_alpha": formulaic_alpha, "obv": obv, "cmf": cmf,
-            "mc_risk": mc_risk,
+            "mc_risk":   mc_risk,
+            "multi_h":   multi_h,
             # GPU signals
             "lstm":        lstm,
             "chronos":     chronos,

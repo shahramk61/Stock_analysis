@@ -64,6 +64,17 @@ def generate_report(data, scores, mc_result, profile):
         print(f"• DL Ensemble      : {dl.get('predicted_5d_return_pct',0):+.2f}% (5d) → {dl.get('direction','N/A')} | uncertainty: ±{dl.get('uncertainty_pct',0):.2f}% | models: {dl.get("models_used",0)}/5 | device: {dl.get('device_used','?')}")
     else:
         print(f"• DL Ensemble      : unavailable ({dl.get('error','?')})")
+    multi_h = signals.get('multi_h', {})
+    if multi_h and 'horizons' in multi_h and not multi_h.get('error'):
+        h_parts = []
+        for hd in ['5d', '10d', '15d', '20d']:
+            r = multi_h['horizons'].get(hd, {})
+            if 'predicted_return_pct' in r:
+                h_parts.append(f"{hd}: {r['predicted_return_pct']:+.1f}%")
+        if h_parts:
+            print(f"• Multi-Horizon    : {' | '.join(h_parts)} → {multi_h.get('consensus_direction','?')} | Trend: {multi_h.get('trend_signal','?')}")
+    elif multi_h.get('error'):
+        print(f"• Multi-Horizon    : unavailable ({multi_h.get('error','?')[:60]})")
 
     print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
     print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")

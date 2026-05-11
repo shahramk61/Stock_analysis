@@ -319,6 +319,23 @@ if run_btn:
         c2.metric("Stop-loss level (−15%)", f"${mc12['stop_price']:.2f}")
         st.caption(f"σ={data.get('annual_vol',0):.1f}% ann. · μ={mc12['drift']*100:.1f}% (score-derived) · 10,000 paths")
 
+    # Multi-Horizon section (bottom of GPU tab)
+    multi_h = sig.get('multi_h', {})
+    if multi_h and 'horizons' in multi_h and not multi_h.get('error'):
+        st.divider()
+        st.subheader("📅 Multi-Horizon Forecast (5d / 10d / 15d / 20d)")
+        horizons_data = multi_h.get('horizons', {})
+        cols = st.columns(len(horizons_data))
+        for i, (hd, r) in enumerate(horizons_data.items()):
+            with cols[i]:
+                if 'predicted_return_pct' in r:
+                    ret = r['predicted_return_pct']
+                    d_  = r.get('direction', 'N/A')
+                    e   = "🟢" if d_=="Bullish" else ("🔴" if d_=="Bearish" else "🟡")
+                    st.metric(f"Horizon {hd}", f"{ret:+.2f}%", delta=f"{e} {d_}")
+                    st.caption(f"Uncertainty: ±{r.get('model_disagreement',0):.2f}% | {r.get('num_models',0)}/5 models")
+        st.caption(f"Consensus: **{multi_h.get('consensus_direction','?')}** | Trend: **{multi_h.get('trend_signal','?')}** | Device: `{multi_h.get('device_used','?')}`")
+
     # TAB 5 — Deep Signals
     with tabs[5]:
         c1,c2 = st.columns(2)

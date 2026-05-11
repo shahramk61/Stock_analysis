@@ -726,3 +726,82 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
             "components": results,
             "models_used": len(preds),
             "device_used": results.get("nhits", {}).get("device_used", "cpu")}
+
+
+def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
+    """
+    Multi-horizon ensemble forecast (5d/10d/15d/20d) using all 5 NeuralForecast models.
+    Returns predicted return, direction, and model disagreement per horizon,
+    plus a trend acceleration signal useful for trading bots.
+    """
+    if horizons is None:
+        horizons = [5, 10, 15, 20]
+    if not _NF_AVAILABLE:
+        return {"error": "neuralforecast not installed", "horizons": {}}
+    device = _gpu_device()
+    if _TORCH_AVAILABLE and device == 'cuda':
+        torch.set_float32_matmul_precision('high')
+    try:
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < 100:
+            return {"error": "Insufficient history", "horizons": {}}
+
+        df = pd.DataFrame({"unique_id": "stock",
+                           "ds": hist.index.tz_localize(None),
+                           "y": hist["Close"].values})
+        last_price = float(hist["Close"].iloc[-1])
+        results    = {}
+
+        for h in horizons:
+            model_preds = []
+            for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"),
+                                     (PatchTST, "PatchTST"), (NBEATS, "NBEATS"),
+                                     (TCN, "TCN")]:
+                try:
+                    extra = {}
+                    if ModelClass is TFT:
+                        extra = {"hidden_size": 128, "n_head": 4}
+                    elif ModelClass is PatchTST:
+                        extra = {"hidden_size": 128, "n_heads": 4}
+                    kwargs = dict(h=h, input_size=120, max_steps=40,
+                                  learning_rate=0.001, loss=MAE(), valid_loss=MAE(),
+                                  early_stop_patience_steps=8, batch_size=32,
+                                  windows_batch_size=512, random_seed=42, **extra)
+                    nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
+                    val_size = max(h, int(len(df) * 0.1))
+                    nf.fit(df=df, val_size=val_size)
+                    pred_price  = float(nf.predict()[name].values[0])
+                    model_preds.append((pred_price - last_price) / last_price * 100)
+                except Exception:
+                    continue
+
+            if not model_preds:
+                results[f"{h}d"] = {"error": "all models failed"}
+                continue
+
+            avg_ret   = round(float(np.mean(model_preds)), 2)
+            std_dev   = round(float(np.std(model_preds)), 2)
+            direction = ("Bullish" if avg_ret > 1.5 else
+                         "Bearish" if avg_ret < -1.5 else "Neutral")
+            results[f"{h}d"] = {"predicted_return_pct": avg_ret,
+                                 "direction": direction,
+                                 "model_disagreement": std_dev,
+                                 "num_models": len(model_preds)}
+
+        valid_rets = [results[f"{h}d"]["predicted_return_pct"]
+                      for h in horizons if f"{h}d" in results
+                      and "predicted_return_pct" in results[f"{h}d"]]
+
+        trend = ("Accelerating Bullish"  if len(valid_rets) >= 2 and valid_rets[-1] > valid_rets[0] + 2 else
+                 "Accelerating Bearish"  if len(valid_rets) >= 2 and valid_rets[-1] < valid_rets[0] - 2 else
+                 "Stable")
+
+        dirs = [results[f"{h}d"]["direction"] for h in horizons
+                if f"{h}d" in results and "direction" in results[f"{h}d"]]
+        consensus = max(set(dirs), key=dirs.count) if dirs else "Neutral"
+
+        return {"horizons": results, "consensus_direction": consensus,
+                "trend_signal": trend, "device_used": device,
+                "model": "Multi-Horizon (NHITS+TFT+PatchTST+N-BEATS+TCN)"}
+    except Exception as e:
+        return {"error": str(e)[:150], "horizons": {}}
