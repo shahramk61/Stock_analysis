@@ -68,7 +68,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     # DL Ensemble boost to technicals (capped ±10 pts)
     dl_boost = 0.0
     if 'predicted_return_pct' in dl_ensemble:
-        dl_pred = dl_ensemble['predicted_5d_return_pct']
+        dl_pred = dl_ensemble['predicted_return_pct']
         dl_boost = max(-10, min(10, dl_pred * 2))
 
     # FinBERT sentiment adjustment (replaces earnings-only sentiment)
