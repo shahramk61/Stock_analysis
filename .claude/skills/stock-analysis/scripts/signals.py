@@ -598,7 +598,7 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5,
                         extra_kwargs={"hidden_size": 128, "n_heads": 4})
 
 
-def get_dl_ensemble(ticker: str, prediction_length: int = 5):
+def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
     """NHITS + TFT + PatchTST ensemble forecast. Uses GPU for all three models."""
     results = {}
     preds   = []

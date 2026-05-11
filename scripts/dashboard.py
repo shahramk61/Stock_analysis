@@ -60,7 +60,7 @@ def run_analysis(ticker, profile, use_gpu):
         import signals as sm
         sm.get_lstm_forecast     = lambda t, **k: {"direction": "Disabled", "predicted_next_return_pct": 0, "signal_strength": 0, "device_used": "disabled"}
         sm.get_finbert_sentiment = lambda t, **k: {"overall_sentiment": "Disabled", "sentiment_score": 50, "num_articles": 0}
-        sm.get_dl_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_5d_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
+        sm.get_nhits_tft_patchtst_ensemble       = lambda t, **k: {"direction": "Disabled", "predicted_5d_return_pct": 0, "uncertainty_pct": 0, "models_used": 0, "device_used": "disabled"}
     scores = calculate_pillars(data, profile)
     mc12 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=252)
     mc36 = run_monte_carlo(data['current_price'], data.get('annual_vol', 25), scores['overall'], days=756)
@@ -275,9 +275,16 @@ if run_btn:
                 st.caption(f"Device: `{dl.get('device_used','?')}`")
                 comps = dl.get('components',{})
                 if comps:
-                    for nm, r in comps.items():
+                    st.markdown("**Model breakdown:**")
+                    model_names = {"nhits": "NHITS", "tft": "TFT", "patchtst": "PatchTST"}
+                    for nm, label in model_names.items():
+                        r = comps.get(nm, {})
                         if 'predicted_5d_return_pct' in r:
-                            st.write(f"  • **{nm.upper()}**: `{r['predicted_5d_return_pct']:+.2f}%`")
+                            pred_val = r['predicted_5d_return_pct']
+                            em = "📈" if pred_val > 1 else ("📉" if pred_val < -1 else "➡")
+                            st.write(f"  {em} **{label}**: `{pred_val:+.2f}%`")
+                        elif 'error' in r:
+                            st.write(f"  ❌ **{label}**: failed")
             else:
                 st.warning(dl.get('error','All models failed')[:80])
 
