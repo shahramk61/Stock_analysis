@@ -511,118 +511,80 @@ class _LSTMForecaster(nn.Module if _TORCH_AVAILABLE else object):
         return self.fc(out[:, -1, :])
 
 
-def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80,
-                      lr: float = 0.001, batch_size: int = 64,
-                      prediction_length: int = 5):
-    """
-    GPU-accelerated LSTM — auto-regressive multi-step forecast.
-    Predicts `prediction_length` steps ahead by feeding each prediction
-    back into the sequence (rolling window). Falls back to CPU.
-    """
+def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: float = 0.001, batch_size: int = 64, prediction_length: int = 5):
     device = "cuda" if (_TORCH_AVAILABLE and torch.cuda.is_available()) else "cpu"
     try:
-        hist    = yf.Ticker(ticker).history(period="5y")
-        if len(hist) < 100:
-            return {"predicted_return_pct": 0.5, "direction": "Neutral",
-                    "signal_strength": 5.0, "device_used": device}
-        closes  = hist['Close'].dropna()
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < 100: return {"predicted_return_pct": 0.5, "direction": "Neutral"}
+        closes = hist['Close'].dropna()
         returns = closes.pct_change().dropna().values.astype(np.float32)
-        if len(returns) <= seq_len:
-            seq_len = max(5, len(returns) // 3)
-
+        if len(returns) <= seq_len: seq_len = max(5, len(returns) // 3)
         X_list, y_list = [], []
         for i in range(len(returns) - seq_len):
             X_list.append(returns[i:i + seq_len])
             y_list.append(returns[i + seq_len])
-        X       = torch.tensor(np.array(X_list), dtype=torch.float32).unsqueeze(-1)
-        y       = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
-        train_n = int(len(X) * 0.9)
-        loader  = DataLoader(TensorDataset(X[:train_n], y[:train_n]),
-                             batch_size=batch_size, shuffle=True, drop_last=True)
-
-        model     = _LSTMForecaster(hidden_size=128, num_layers=2).to(device)
+        X = torch.tensor(np.array(X_list), dtype=torch.float32).unsqueeze(-1)
+        y = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
+        train_size = int(len(X) * 0.9)
+        X_train, y_train = X[:train_size], y[:train_size]
+        model = _LSTMForecaster(hidden_size=128, num_layers=2).to(device)
         criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        dataset = TensorDataset(X_train, y_train)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
         model.train()
-        for _ in range(epochs):
+        for epoch in range(epochs):
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
-                loss = criterion(model(xb), yb)
-                optimizer.zero_grad(); loss.backward(); optimizer.step()
-
-        # Auto-regressive multi-step forecast
+                pred = model(xb)
+                loss = criterion(pred, yb)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
         model.eval()
-        predictions  = []
-        current_seq  = torch.tensor(returns[-seq_len:], dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
+        predictions = []
+        current_seq = torch.tensor(returns[-seq_len:], dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
         for _ in range(prediction_length):
-            with torch.no_grad():
-                next_pred = model(current_seq).item()
+            with torch.no_grad(): next_pred = model(current_seq).item()
             predictions.append(next_pred)
-            next_t      = torch.tensor([[[next_pred]]], dtype=torch.float32).to(device)
-            current_seq = torch.cat([current_seq[:, 1:, :], next_t], dim=1)
-
+            current_seq = torch.cat([current_seq[:, 1:, :], torch.tensor([[next_pred]], dtype=torch.float32).unsqueeze(-1).to(device)], dim=1)
         final_pred = predictions[-1]
-        direction  = ("Bullish" if final_pred > 0.005 else
-                      "Bearish" if final_pred < -0.005 else "Neutral")
-        return {
-            "predicted_return_pct": round(final_pred * 100, 2),
-            "direction":            direction,
-            "prediction_length":    prediction_length,
-            "all_predictions":      [round(p * 100, 2) for p in predictions],
-            "signal_strength":      round(min(abs(final_pred) * 200, 100), 1),
-            "device_used":          device,
-            "model":                f"LSTM ({prediction_length}d auto-regressive)",
-        }
-    except Exception as e:
-        return {"predicted_return_pct": 0.0, "direction": "Neutral",
-                "error": str(e)[:100], "device_used": device}
+        direction = "Bullish 📈" if final_pred > 0.005 else "Bearish 📉" if final_pred < -0.005 else "Neutral ➕"
+        return {"predicted_return_pct": round(final_pred * 100, 2), "direction": direction, "prediction_length": prediction_length, "all_predictions": [round(p * 100, 2) for p in predictions], "device_used": device, "model": f"LSTM ({prediction_length}d)"}
+    except Exception as e: return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
 
 
 def get_chronos_forecast(ticker: str, prediction_length: int = 5):
-    """
-    Zero-shot forecast using Amazon Chronos-2 (120M params). No per-stock
-    training. GPU-accelerated inference. Computes 10th/50th/90th percentiles
-    from the sample distribution returned by the model.
-    """
     try:
         from chronos import Chronos2Pipeline
         device_map = "cuda" if (_TORCH_AVAILABLE and torch.cuda.is_available()) else "cpu"
-        pipeline   = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device_map)
-
+        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device_map)
         hist = yf.Ticker(ticker).history(period="2y")
-        if len(hist) < 50:
-            return {"error": "Insufficient data", "direction": "Neutral"}
+        if len(hist) < 50: return {"error": "Insufficient data"}
+        context = hist['Close'].dropna().values[-100:].tolist()
+        last_price = context[-1]
+        # Try quantile_levels API first; fall back to manual percentile sampling
+        try:
+            forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
+            q10, q50, q90 = forecast[0].cpu().numpy(), forecast[1].cpu().numpy(), forecast[2].cpu().numpy()
+        except TypeError:
+            ctx_t = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            samples = pipeline.predict(ctx_t, prediction_length=prediction_length)
+            s = samples[0].squeeze(0).cpu().numpy()
+            q10 = np.percentile(s[:, -1], 10)
+            q50 = np.percentile(s[:, -1], 50)
+            q90 = np.percentile(s[:, -1], 90)
+        pred_return = float((float(q50 if np.ndim(q50)==0 else q50[-1]) - last_price) / last_price * 100)
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        q10v = float(q10 if np.ndim(q10)==0 else q10[-1])
+        q90v = float(q90 if np.ndim(q90)==0 else q90[-1])
+        return {"predicted_return_pct": round(pred_return, 2), "direction": direction, "prediction_length": prediction_length,
+                "uncertainty_range_pct": round((q90v - q10v) / last_price * 100, 1),
+                "lower_10pct": round((q10v - last_price) / last_price * 100, 2),
+                "upper_90pct": round((q90v - last_price) / last_price * 100, 2),
+                "model": "Chronos-2", "device_used": device_map}
+    except Exception as e: return {"error": str(e)[:150], "direction": "Neutral"}
 
-        context    = hist['Close'].dropna().values[-100:]
-        last_price = float(context[-1])
-
-        # Chronos2 expects (n_series, n_variates, history_length)
-        ctx_tensor = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        samples    = pipeline.predict(ctx_tensor, prediction_length=prediction_length)
-        # samples[0]: (batch=1, n_samples, pred_len) → squeeze batch
-        s   = samples[0].squeeze(0).cpu().numpy()   # (n_samples, pred_len)
-        q10 = float(np.percentile(s[:, -1], 10))
-        q50 = float(np.percentile(s[:, -1], 50))
-        q90 = float(np.percentile(s[:, -1], 90))
-
-        pred_return = (q50 - last_price) / last_price * 100
-        direction   = ("Bullish" if pred_return > 1.0 else
-                       "Bearish" if pred_return < -1.0 else "Neutral")
-
-        return {
-            "predicted_return_pct":  round(pred_return, 2),
-            "direction":             direction,
-            "prediction_length":     prediction_length,
-            "uncertainty_range_pct": round((q90 - q10) / last_price * 100, 1),
-            "lower_10pct":           round((q10 - last_price) / last_price * 100, 2),
-            "upper_90pct":           round((q90 - last_price) / last_price * 100, 2),
-            "model":                 "Chronos-2",
-            "device_used":           device_map,
-        }
-    except ImportError:
-        return {"error": "chronos-forecasting not installed", "direction": "Neutral"}
-    except Exception as e:
-        return {"error": str(e)[:150], "direction": "Neutral"}
 
 
 def get_finbert_sentiment(ticker: str, max_news: int = 10):
