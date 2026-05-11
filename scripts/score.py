@@ -8,9 +8,10 @@ from signals import (
     get_lstm_forecast,
     get_chronos_forecast,
     get_nhits_forecast,
-    get_nhits_tft_patchtst_ensemble,  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
-    get_patchtst_forecast,  # NEW: PatchTST — top-tier SOTA patch-based transformer (2024+ benchmarks)
-    get_finbert_sentiment  # NEW: FinBERT news sentiment for Sentiment pillar
+    get_nhits_tft_patchtst_ensemble,
+    get_patchtst_forecast,
+    get_finbert_sentiment,
+    get_multi_horizon_forecasts   # NEW: Full multi-horizon (5d/10d/15d/20d)
 )
 from dcf import calculate_dcf
 
@@ -24,12 +25,13 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     earnings = get_earnings_surprise(ticker)
     beta = get_rolling_beta(ticker)
     dcf_val = calculate_dcf(data)
-    risk = get_monte_carlo_risk(ticker)  # NEW: Monte Carlo downside risk simulation
-    lstm_forecast = get_lstm_forecast(ticker)  # GPU-accelerated LSTM (local training)
-    chronos_forecast = get_chronos_forecast(ticker)  # Zero-shot Chronos-2 foundation model
-    nhits_forecast = get_nhits_forecast(ticker)  # SOTA NHITS
-    ensemble_forecast = get_nhits_tft_patchtst_ensemble(ticker)  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
-    patchtst_forecast = get_patchtst_forecast(ticker)  # NEW: PatchTST — top-tier SOTA patch-based transformer
+    risk = get_monte_carlo_risk(ticker)
+    lstm_forecast = get_lstm_forecast(ticker)
+    chronos_forecast = get_chronos_forecast(ticker)
+    nhits_forecast = get_nhits_forecast(ticker)
+    ensemble_forecast = get_nhits_tft_patchtst_ensemble(ticker)
+    patchtst_forecast = get_patchtst_forecast(ticker)
+    multi_horizon = get_multi_horizon_forecasts(ticker)  # NEW: Full 5d/10d/15d/20d
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
@@ -37,31 +39,25 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
 
     technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100)))
     
-    # NEW: Boost technicals with LSTM DL forecast (positive predicted return = bullish momentum)
     ml_boost = lstm_forecast.get('predicted_next_return_pct', 0) * 0.6
     technicals = min(95, max(30, technicals + ml_boost))
     
-    # Additional boost from Chronos (5d)
     chronos_boost = chronos_forecast.get('predicted_5d_return_pct', 0) * 0.15
     technicals = min(95, max(30, technicals + chronos_boost))
 
-    # NEW: Additional boost from PatchTST (strong SOTA forecaster from 2024+ benchmarks)
     patchtst_boost = patchtst_forecast.get('predicted_5d_return_pct', 0) * 0.15
     technicals = min(95, max(30, technicals + patchtst_boost))
 
-    # NEW: Strong boost from NHITS/TFT/PatchTST ensemble (SOTA, with uncertainty) — primary DL signal
     ensemble_boost = ensemble_forecast.get('predicted_5d_return_pct', 0) * 0.30
     technicals = min(95, max(30, technicals + ensemble_boost))
 
     valuation = min(95, max(30, 60 + (dcf_upside * 0.3)))
     
-    # NEW: Real Sentiment pillar from FinBERT news analysis (replaces earnings placeholder)
     sentiment_signal = get_finbert_sentiment(ticker)
     sentiment = min(95, max(30, sentiment_signal.get("sentiment_score", 50.0)))
     
     esg_quality = min(95, max(40, 70 + (10 if distress['risk_level'] == "Safe" else -15)))
     
-    # NEW: Risk pillar from MC simulation (lower VaR = better risk score)
     risk_score = min(95, max(30, 90 - risk['var_95'] * 1.5 - (risk['cvar_95'] - risk['var_95']) * 0.8 ))
     
     weights = {
@@ -82,19 +78,20 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
         "valuation": round(valuation, 1),
         "sentiment": round(sentiment, 1),
         "esg_quality": round(esg_quality, 1),
-        "risk": round(risk_score, 1),  # NEW
+        "risk": round(risk_score, 1),
         "signals": {
             "ivr": iv_signal,
             "distress": distress,
             "earnings": earnings,
             "beta": beta,
             "dcf": dcf_val,
-            "mc_risk": risk,  # NEW simulation signal
+            "mc_risk": risk,
             "lstm_forecast": lstm_forecast,
             "chronos_forecast": chronos_forecast,
             "nhits_forecast": nhits_forecast,
-            "ensemble_forecast": ensemble_forecast,  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
-            "patchtst_forecast": patchtst_forecast,  # NEW: PatchTST — top-tier SOTA patch-based transformer
-            "finbert_sentiment": sentiment_signal
+            "ensemble_forecast": ensemble_forecast,
+            "patchtst_forecast": patchtst_forecast,
+            "finbert_sentiment": sentiment_signal,
+            "multi_horizon_forecasts": multi_horizon   # NEW: Full 5d/10d/15d/20d
         }
     }

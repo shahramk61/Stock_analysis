@@ -23,58 +23,54 @@ def generate_report(data, scores, mc_result, profile):
     print(f"• Earnings Surprise: {signals['earnings']['avg_surprise_pct']:+.1f}%")
     print(f"• Beta (vs SPY)    : {signals['beta']['beta']} (Alpha: {signals['beta']['alpha']})")
     
-    # NEW: FinBERT News Sentiment (GPU powered, for Sentiment pillar)
+    # FinBERT
     sent = signals.get("finbert_sentiment", {})
     if "error" not in sent:
-        print(f"• News Sentiment   : {sent.get('overall_sentiment', 'Neutral')} (score: {sent.get('sentiment_score', 50)}/100) | +{sent.get('positive_pct', 0)}% / ~{sent.get('neutral_pct', 0)}% / -{sent.get('negative_pct', 0)}% ({sent.get('num_articles', 0)} articles) on {sent.get('device_used', 'cpu')}")
+        print(f"• News Sentiment   : {sent.get('overall_sentiment', 'Neutral')} (score: {sent.get('sentiment_score', 50)}/100)")
     else:
         print(f"• News Sentiment   : Neutral ({sent.get('note', sent.get('error', 'N/A'))})")
     
-    # NEW MC Risk signal
+    # MC Risk
     mc_risk = signals.get('mc_risk', {})
     print(f"• MC VaR 95% (1y)  : {mc_risk.get('var_95', 0)}%  |  CVaR: {mc_risk.get('cvar_95', 0)}%")
-    print(f"• Simulated Vol    : {mc_risk.get('simulated_annual_vol', 0)}%  |  Drift: {mc_risk.get('annual_drift', 0)}%")
     
-    # NEW: LSTM Deep Learning Forecast (GPU powered)
+    # LSTM
     lstm = signals.get('lstm_forecast', {})
-    print(f"• LSTM DL Forecast : {lstm.get('predicted_next_return_pct', 0)}% next-day | {lstm.get('direction', 'N/A')} (strength: {lstm.get('signal_strength', 0)}/100 on {lstm.get('device_used', 'cpu')})")
+    print(f"• LSTM DL Forecast : {lstm.get('predicted_next_return_pct', lstm.get('predicted_return_pct', 0))}% next-day | {lstm.get('direction', 'N/A')}")
     
-    # NEW: Chronos-2 Foundation Model Forecast (zero-shot, very high GPU benefit)
+    # Chronos
     chronos = signals.get('chronos_forecast', {})
     if "error" not in chronos:
-        print(f"• Chronos Forecast : {chronos.get('predicted_5d_return_pct', 0)}% (5d) | {chronos.get('direction', 'N/A')} | Range: {chronos.get('lower_10pct_return', 0)}% to {chronos.get('upper_90pct_return', 0)}% (uncert: {chronos.get('uncertainty_range_pct', 0)}%) on {chronos.get('device_used', 'cpu')}")
-    else:
-        print(f"• Chronos Forecast : {chronos.get('error', 'N/A')}")
+        print(f"• Chronos Forecast : {chronos.get('predicted_return_pct', 0)}% ({chronos.get('prediction_length', 5)}d) | {chronos.get('direction', 'N/A')}")
     
-    # NEW: NHITS SOTA Neural Forecast (via NeuralForecast — more accurate than LSTM/Chronos for many horizons)
+    # NHITS + PatchTST + Ensemble (keep short)
     nhits = signals.get('nhits_forecast', {})
     if "error" not in nhits:
-        print(f"• NHITS Forecast  : {nhits.get('predicted_5d_return_pct', 0)}% (5d) | {nhits.get('direction', 'N/A')} | {nhits.get('model', 'NHITS')} (trained {nhits.get('epochs_trained', '?')} epochs on {nhits.get('device_used', 'cpu')})")
-    else:
-        print(f"• NHITS Forecast  : {nhits.get('error', 'N/A')}")
+        print(f"• NHITS Forecast   : {nhits.get('predicted_return_pct', nhits.get('predicted_5d_return_pct', 0))}% (5d)")
     
-    # NEW: PatchTST SOTA Neural Forecast (via NeuralForecast — top-tier 2024+ model with patching for efficient long-horizon forecasting)
     patchtst = signals.get('patchtst_forecast', {})
     if "error" not in patchtst:
-        print(f"• PatchTST Forecast: {patchtst.get('predicted_5d_return_pct', 0)}% (5d) | {patchtst.get('direction', 'N/A')} | {patchtst.get('model', 'PatchTST')} (trained {patchtst.get('epochs_trained', '?')} epochs on {patchtst.get('device_used', 'cpu')})")
-    else:
-        print(f"• PatchTST Forecast: {patchtst.get('error', 'N/A')}")
+        print(f"• PatchTST Forecast: {patchtst.get('predicted_return_pct', patchtst.get('predicted_5d_return_pct', 0))}% (5d)")
     
-    # NHITS + TFT + PatchTST Ensemble (all 3 SOTA models)
     ensemble = signals.get('ensemble_forecast', {})
     if "error" not in ensemble:
-        print(f"• Ensemble Forecast: {ensemble.get('predicted_5d_return_pct', 0)}% (5d) | {ensemble.get('direction', 'N/A')} | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}% ({ensemble.get('models_used', 3)} models) on {ensemble.get('device_used', 'cpu')}")
+        print(f"• Ensemble (NHITS+TFT+PatchTST): {ensemble.get('predicted_return_pct', ensemble.get('predicted_5d_return_pct', 0))}% (5d) | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}%")
+    
+    # Multi-Horizon Forecasts (5d / 10d / 15d / 20d)
+    multi = signals.get('multi_horizon_forecasts', {})
+    if "error" not in multi and "horizons" in multi:
+        print("\n📅 Multi-Horizon Forecasts (5d / 10d / 15d / 20d):")
+        for h in ["5d", "10d", "15d", "20d"]:
+            if h in multi["horizons"]:
+                h_data = multi["horizons"][h]
+                print(f"   {h:>4}  →  {h_data.get('predicted_return_pct', 0):+6.1f}%   | {h_data.get('direction', 'N/A')}   (uncert: ±{h_data.get('model_disagreement', 0)}%)")
+        print(f"   Trend: {multi.get('trend_signal', 'N/A')}")
     else:
-        print(f"• Ensemble Forecast: {ensemble.get('error', 'N/A')}")
+        print(f"\n📅 Multi-Horizon: {multi.get('error', 'N/A')}")
     
-    print(f"\n📈 Monte Carlo (10,000 paths - 12 months):")
-    print(f"   Median Target : ${mc_result['median']:.2f}  (+{(mc_result['median']/price-1)*100:+.1f}%)")
-    print(f"   10th–90th     : ${mc_result['p10']:.2f} — ${mc_result['p90']:.2f}")
-    
-    # NEW: Risk pillar
-    print(f"\n⚠️  Risk Score      : {scores.get('risk', 70)}/100  (from MC simulation)")
-    
-    print("\n" + "="*80)
+    print(f"\n📈 Monte Carlo (12 months): Median ${mc_result['median']:.2f}  |  Range: ${mc_result['p10']:.2f} – ${mc_result['p90']:.2f}")
+    print(f"\n{'='*80}\n")
+
 
 def generate_json_report(data, scores, mc_result, profile):
     output = {
@@ -84,27 +80,19 @@ def generate_json_report(data, scores, mc_result, profile):
         "overall_score": scores['overall'],
         "profile": profile,
         "recommendation": "BUY" if scores['overall'] >= 70 else "HOLD" if scores['overall'] >= 50 else "SELL",
-        "confidence": round(scores['overall'] / 100, 2),
         "pillars": {
             "fundamentals": scores['fundamentals'],
             "technicals": scores['technicals'],
-            "valuation": scores['validation'],
+            "valuation": scores['valuation'],
             "sentiment": scores['sentiment'],
             "esg_quality": scores['esg_quality'],
-            "risk": scores.get('risk', 70)  # NEW
+            "risk": scores.get('risk', 70)
         },
         "signals": scores['signals'],
-        "monte_carlo": mc_result,
-        "suggested_action": {
-            "action": "BUY" if scores['overall'] >= 70 else "HOLD",
-            "risk_percent": 1.5,
-            "stop_loss": round(data['current_price'] * 0.85, 2),
-            "take_profit": round(mc_result['median'], 2)
-        }
+        "monte_carlo": mc_result
     }
     
     filename = f"signals_{data['ticker']}.json"
     with open(filename, 'w') as f:
         json.dump(output, f, indent=2)
-    
     return filename

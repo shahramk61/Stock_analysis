@@ -270,7 +270,7 @@ def get_finbert_sentiment(ticker: str, max_news: int = 10):
             reverse=True
         )[:max_news]
 
-        titles = [item.get("title", "").strip() for n in recent_news if item.get("title") and len(n.get("title","")) > 5]
+        titles = [n.get("title", "").strip() for n in recent_news if n.get("title") and len(n.get("title","")) > 5]
         titles = [t for t in titles if len(t) > 5]  # filter very short
 
         if not titles:
@@ -373,8 +373,8 @@ def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int 
             learning_rate=0.001,
             num_layers=3,
             hidden_size=128,
-            loss="MAE",
-            valid_loss="MAE",
+            loss=MAE(),
+            valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
@@ -447,8 +447,8 @@ def get_tft_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
             learning_rate=0.001,
             hidden_size=128,
             n_head=4,
-            loss="MAE",
-            valid_loss="MAE",
+            loss=MAE(),
+            valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
@@ -547,8 +547,8 @@ def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: i
             learning_rate=0.001,
             hidden_size=128,
             n_heads=4,
-            loss="MAE",
-            valid_loss="MAE",
+            loss=MAE(),
+            valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
@@ -618,8 +618,8 @@ def get_nbeats_forecast(ticker: str, prediction_length: int = 5, input_size: int
             input_size=input_size,
             max_steps=epochs,
             learning_rate=0.001,
-            loss="MAE",
-            valid_loss="MAE",
+            loss=MAE(),
+            valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
@@ -690,8 +690,8 @@ def get_tcn_forecast(ticker: str, prediction_length: int = 5, input_size: int = 
             max_steps=epochs,
             learning_rate=0.001,
             hidden_size=128,
-            loss="MAE",
-            valid_loss="MAE",
+            loss=MAE(),
+            valid_loss=MAE(),
             early_stop_patience_steps=10,
             val_check_steps=5,
             batch_size=32,
@@ -762,6 +762,10 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
         results = {}
         last_price = hist["Close"].iloc[-1]
 
+        from neuralforecast import NeuralForecast as _NF
+        from neuralforecast.models import NHITS, TFT, PatchTST, NBEATS, TCN
+        from neuralforecast.losses.pytorch import MAE
+
         for h in horizons:
             model_preds = []
             for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"), (PatchTST, "PatchTST"), (NBEATS, "NBEATS"), (TCN, "TCN")]:
@@ -771,8 +775,8 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                         input_size=120,
                         max_steps=40,
                         learning_rate=0.001,
-                        loss="MAE",
-                        valid_loss="MAE",
+                        loss=MAE(),
+                        valid_loss=MAE(),
                         early_stop_patience_steps=8,
                         batch_size=32,
                         random_seed=42,
@@ -802,17 +806,18 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
             }
 
         # Extra signals for trading bot
-        returns = [results[f"{h}d"]["predicted_return_pct"] for h in horizons if f"{h}d" in results]
+        returns = [results[f"{h}d"]["predicted_return_pct"] for h in horizons if f"{h}d" in results and "predicted_return_pct" in results[f"{h}d"]]
         if returns:
             trend = "Accelerating Bullish" if returns[-1] > returns[0] + 2 else \
                     ("Accelerating Bearish" if returns[-1] < returns[0] - 2 else "Stable")
         else:
             trend = "Unknown"
 
+        dirs = [r["direction"] for r in results.values() if "direction" in r]
+        consensus = max(set(dirs), key=lambda x: dirs.count(x)) if dirs else "Neutral"
         return {
             "horizons": results,
-            "consensus_direction": max(set([r["direction"] for r in results.values() if "direction" in r]), 
-                                       key=lambda x: sum(1 for r in results.values() if r.get("direction") == x)),
+            "consensus_direction": consensus,
             "trend_signal": trend,
             "model": "Multi-Horizon Ensemble (NHITS + TFT + PatchTST + N-BEATS + TCN)",
             "device_used": device
