@@ -1,17 +1,21 @@
-# Stock Analysis Skill v4.8 — Advanced Quantitative Signals + Monte Carlo Simulations + GPU Deep Learning (Chronos + LSTM + FinBERT + NHITS/TFT Ensemble + PatchTST + Uncertainty)
+# Stock Analysis Skill v4.9 — Advanced Quantitative Signals + Monte Carlo Simulations + GPU Deep Learning (Chronos + LSTM + FinBERT + NHITS/TFT/PatchTST Ensemble + Uncertainty)
 
-**Version:** 4.8  
-**Last Updated:** 2026-05-10
+**Version:** 4.9  
+**Last Updated:** 2026-05-11
 
 **Command:** `python scripts/analyze.py TICKER --profile [Balanced|Growth|Value|Momentum] --output [report|json|both]`
 
 **Interactive Dashboard:** `streamlit run scripts/dashboard.py` (recommended for exploration)
 
-### New in v4.8
-- **PatchTST** (`get_patchtst_forecast`): Patch Time Series Transformer via NeuralForecast — one of the top-performing SOTA models (2024+ benchmarks often #1). Uses efficient patching for transformer attention on time series. Complements NHITS + TFT ensemble perfectly; added as additional high-quality 5-day forecast signal with its own technicals boost. GPU-accelerated on RTX 5080.
-- Updated report to display PatchTST Forecast.
-- Updated score.py with PatchTST integration and boost (0.15 weight).
-- Bumped to v4.8 with PatchTST as newest DL signal.
+### New in v4.9
+- **Major Polish & Expansion**:
+  - Renamed ensemble to `get_nhits_tft_patchtst_ensemble` (explicitly includes all 3 SOTA models: NHITS + TFT + PatchTST).
+  - Added 12+ high-impact quantitative signals: Piotroski F-Score, ATR volatility clustering, Relative Strength vs SPY/Sector, Momentum + 52-week high, Gross Profitability/Accruals (Novy-Marx), HMM Regime Detection, GARCH(1,1) volatility forecast, Amihud Illiquidity, Share Turnover, Volume-Price Correlation, Formulaic Alpha, OBV, Chaikin Money Flow.
+  - Refactored GPU signals with shared `_nf_forecast` helper + optional dependency guards.
+  - Standardized all emojis (📈 / 📉 / ➕) and cleaned sentiment text.
+  - Updated dashboard with per-model metric rows and better error handling.
+- Updated requirements.txt with `arch` and `hmmlearn`.
+- Resolved version divergence between root `scripts/` and `.claude/skills/` (now consistent).
 
 ### Previous (v4.7)
 - **NHITS/TFT Ensemble + Uncertainty** + Interactive Dashboard
@@ -19,7 +23,7 @@
 **Core Capabilities**
 - Real yfinance data
 - 10,000-path Monte Carlo price projection (GBM)
-- **NEW in 4.8**: PatchTST (SOTA patch-based transformer via NeuralForecast) + NHITS/TFT Ensemble with uncertainty (multi-model DL forecasting flagship)
+- **NEW in 4.9**: Full 3-model ensemble (NHITS + TFT + PatchTST) + 12+ new quant signals (Piotroski, GARCH, HMM, liquidity, momentum, etc.)
 - **Interactive Streamlit Dashboard** with Plotly visualizations, live controls, and export
 - FinBERT news sentiment (GPU accelerated transformer for Sentiment pillar)
 - Zero-shot Chronos-2 foundation model forecast (GPU accelerated, no training)
@@ -48,3 +52,7 @@ streamlit run scripts/dashboard.py
 - **chronos-forecasting** (for Chronos-2 zero-shot forecasting; installs with torch)
 - **transformers** (for FinBERT sentiment; installs with torch)
 - **neuralforecast** (for NHITS, TFT, PatchTST SOTA neural forecasting; GPU via torch)
+- **arch** (GARCH volatility)
+- **hmmlearn** (HMM regime detection)
+- streamlit (dashboard)
+- plotly (charts)
