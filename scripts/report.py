@@ -47,7 +47,13 @@ def generate_report(data, scores, mc_result, profile):
     # Chronos
     chronos = signals.get('chronos_forecast', {})
     if "error" not in chronos:
-        print(f"• Chronos Forecast : {chronos.get('predicted_return_pct', 0)}% ({chronos.get('prediction_length', 5)}d) | {chronos.get('direction', 'N/A')}")
+        plen = chronos.get('prediction_length', 5)
+        c_preds = chronos.get('all_predictions', [])
+        if c_preds:
+            path = " → ".join(f"{v:+.2f}%" for v in c_preds)
+            print(f"• Chronos Forecast : {plen}d path: {path} | {chronos.get('direction', 'N/A')}")
+        else:
+            print(f"• Chronos Forecast : {chronos.get('predicted_return_pct', 0)}% ({plen}d) | {chronos.get('direction', 'N/A')}")
     
     # NHITS + PatchTST + Ensemble (keep short)
     nhits = signals.get('nhits_forecast', {})

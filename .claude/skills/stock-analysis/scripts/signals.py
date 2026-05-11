@@ -563,25 +563,39 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5):
         if len(hist) < 50: return {"error": "Insufficient data"}
         context = hist['Close'].dropna().values[-100:].tolist()
         last_price = context[-1]
-        # Try quantile_levels API first; fall back to manual percentile sampling
         try:
             forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
-            q10, q50, q90 = forecast[0].cpu().numpy(), forecast[1].cpu().numpy(), forecast[2].cpu().numpy()
+            q10_arr = np.atleast_1d(forecast[0].cpu().numpy())
+            q50_arr = np.atleast_1d(forecast[1].cpu().numpy())
+            q90_arr = np.atleast_1d(forecast[2].cpu().numpy())
         except TypeError:
             ctx_t = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             samples = pipeline.predict(ctx_t, prediction_length=prediction_length)
             s = samples[0].squeeze(0).cpu().numpy()
-            q10 = np.percentile(s[:, -1], 10)
-            q50 = np.percentile(s[:, -1], 50)
-            q90 = np.percentile(s[:, -1], 90)
-        pred_return = float((float(q50 if np.ndim(q50)==0 else q50[-1]) - last_price) / last_price * 100)
+            q10_arr = np.percentile(s, 10, axis=0)
+            q50_arr = np.percentile(s, 50, axis=0)
+            q90_arr = np.percentile(s, 90, axis=0)
+
+        daily_returns_q50 = [round(float((float(p) - last_price) / last_price * 100), 3) for p in q50_arr]
+        daily_returns_q10 = [round(float((float(p) - last_price) / last_price * 100), 3) for p in q10_arr]
+        daily_returns_q90 = [round(float((float(p) - last_price) / last_price * 100), 3) for p in q90_arr]
+        daily_prices_q50  = [round(float(p), 2) for p in q50_arr]
+
+        pred_return = daily_returns_q50[-1] if daily_returns_q50 else 0.0
         direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
-        q10v = float(q10 if np.ndim(q10)==0 else q10[-1])
-        q90v = float(q90 if np.ndim(q90)==0 else q90[-1])
-        return {"predicted_return_pct": round(pred_return, 2), "direction": direction, "prediction_length": prediction_length,
-                "uncertainty_range_pct": round((q90v - q10v) / last_price * 100, 1),
-                "lower_10pct": round((q10v - last_price) / last_price * 100, 2),
-                "upper_90pct": round((q90v - last_price) / last_price * 100, 2),
+        q10v_last = daily_returns_q10[-1] if daily_returns_q10 else 0.0
+        q90v_last = daily_returns_q90[-1] if daily_returns_q90 else 0.0
+
+        return {"predicted_return_pct": round(pred_return, 2),
+                "direction": direction,
+                "prediction_length": prediction_length,
+                "all_predictions":     daily_returns_q50,
+                "daily_prices":        daily_prices_q50,
+                "lower_path":          daily_returns_q10,
+                "upper_path":          daily_returns_q90,
+                "uncertainty_range_pct": round(q90v_last - q10v_last, 1),
+                "lower_10pct": round(q10v_last, 2),
+                "upper_90pct": round(q90v_last, 2),
                 "model": "Chronos-2", "device_used": device_map}
     except Exception as e: return {"error": str(e)[:150], "direction": "Neutral"}
 

@@ -418,14 +418,28 @@ if st.session_state.get('ready'):
                         hovertemplate=("<b>LSTM</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
                     ))
 
-                # === Chronos-2 (orange dotted) — v4.20: linear steps, dynamic horizon ===
+                # === Chronos-2 (orange dotted) — v4.21: real daily path from quantiles ===
                 chronos_dyn = None
                 try:
                     from signals import get_chronos_forecast as _ch_fn
                     chronos_dyn = _ch_fn(ticker, prediction_length=horizon_days)
                 except Exception:
                     chronos_dyn = chronos
-                if chronos_dyn and "predicted_return_pct" in chronos_dyn:
+                if chronos_dyn and "all_predictions" in chronos_dyn and chronos_dyn["all_predictions"]:
+                    # Real daily cumulative returns from Chronos quantile q50
+                    cum_chronos = list(chronos_dyn["all_predictions"])
+                    h_len = len(daily) if daily else len(cum_chronos)
+                    cum_chronos = cum_chronos[:h_len]
+                    y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
+                    fig_daily.add_trace(go.Scatter(
+                        x=x_vals[:len(y_chronos)], y=y_chronos,
+                        mode="lines", name="Chronos-2",
+                        line=dict(color="#f97316", width=2, dash="dot"),
+                        opacity=0.9,
+                        hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
+                    ))
+                elif chronos_dyn and "predicted_return_pct" in chronos_dyn:
+                    # Fallback: linear interpolation only if daily path unavailable
                     plen = chronos_dyn.get("prediction_length", horizon_days)
                     final_ret = chronos_dyn["predicted_return_pct"]
                     if plen > 0 and final_ret is not None:
@@ -436,9 +450,9 @@ if st.session_state.get('ready'):
                         y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
                         fig_daily.add_trace(go.Scatter(
                             x=x_vals[:len(y_chronos)], y=y_chronos,
-                            mode="lines", name="Chronos-2",
+                            mode="lines", name="Chronos-2 (linear)",
                             line=dict(color="#f97316", width=2, dash="dot"),
-                            opacity=0.9,
+                            opacity=0.6,
                             hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
                         ))
 
