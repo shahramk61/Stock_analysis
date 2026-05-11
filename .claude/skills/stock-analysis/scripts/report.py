@@ -53,7 +53,7 @@ def generate_report(data, scores, mc_result, profile):
         print(f"• LSTM Forecast    : {lstm.get('predicted_return_pct', 0):+.2f}% ({lstm.get('prediction_length',1)}d) → {lstm.get('direction','N/A')} (strength: {lstm.get('signal_strength',0):.0f}/100, device: {lstm.get('device_used','?')}){preds_str}")
     else:
         print(f"• LSTM Forecast    : unavailable ({lstm.get('error','?')})")
-    if 'error' not in chronos and 'predicted_5d_return_pct' in chronos:
+    if 'error' not in chronos and 'predicted_return_pct' in chronos:
         print(f"• Chronos-2 Fcst   : {chronos.get('predicted_return_pct',0):+.2f}% ({chronos.get('prediction_length',5)}d) → {chronos.get('direction','N/A')} | range: {chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}% | ±{chronos.get('uncertainty_range_pct',0):.1f}% | device: {chronos.get('device_used','?')}")
     else:
         print(f"• Chronos-2 Fcst   : unavailable ({chronos.get('error','not installed')})")
@@ -62,7 +62,7 @@ def generate_report(data, scores, mc_result, profile):
     else:
         print(f"• FinBERT Sentiment: unavailable ({finbert.get('error','?')})")
     if 'error' not in dl:
-        print(f"• DL Ensemble      : {dl.get('predicted_5d_return_pct',0):+.2f}% (5d) → {dl.get('direction','N/A')} | uncertainty: ±{dl.get('uncertainty_pct',0):.2f}% | models: {dl.get("models_used",0)}/5 | device: {dl.get('device_used','?')}")
+        print(f"• DL Ensemble      : {dl.get('predicted_return_pct',0):+.2f}% (5d) → {dl.get('direction','N/A')} | uncertainty: ±{dl.get('uncertainty_pct',0):.2f}% | models: {dl.get('models_used',0)}/5 | device: {dl.get('device_used','?')}")
     else:
         print(f"• DL Ensemble      : unavailable ({dl.get('error','?')})")
     multi_h = signals.get('multi_h', {})
