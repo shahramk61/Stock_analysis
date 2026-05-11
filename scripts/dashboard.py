@@ -1,31 +1,27 @@
-# In the Multi-Horizon plotting section, replace the LSTM trace block with this improved version:
+# Chronos-2 dynamic handling in Multi-Horizon tab (add after LSTM block):
 
-                # LSTM: realistic path (direction from model + ensemble-style noise)
-                lstm = None
+                # Chronos-2: dynamic call with full horizon
+                chronos = None
                 try:
-                    from signals import get_lstm_forecast
+                    from signals import get_chronos_forecast
                     horizon_days = int(sel_h.replace('d',''))
-                    lstm = get_lstm_forecast(ticker, prediction_length=horizon_days)
+                    chronos = get_chronos_forecast(ticker, prediction_length=horizon_days)
                 except:
                     pass
 
-                if lstm and "all_predictions" in lstm:
-                    raw_preds = lstm["all_predictions"]
-                    total_ret = sum(raw_preds) / 100.0
-                    n = len(raw_preds)
-                    # Create realistic path: linear trend + small noise (matches ensemble character)
-                    np.random.seed(42)
-                    noise = np.random.normal(0, 0.8, n)  # ~0.8% daily noise
-                    trend = np.linspace(0, total_ret * 100, n)
-                    realistic = np.clip(trend + noise, -4, 4)  # keep daily moves reasonable
-                    cum_lstm = np.cumsum(realistic).tolist()
-                    h_len = len(daily) if daily else len(cum_lstm)
-                    cum_lstm = cum_lstm[:h_len]
-                    y_lstm = ([0.0] + cum_lstm) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_lstm])
-                    fig_daily.add_trace(go.Scatter(
-                        x=x_vals[:len(y_lstm)], y=y_lstm,
-                        mode="lines", name="LSTM",
-                        line=dict(color="#22c55e", width=2, dash="dash"),
-                        opacity=0.85,
-                        hovertemplate=("<b>LSTM</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
-                    ))
+                if chronos and "predicted_return_pct" in chronos:
+                    plen = chronos.get("prediction_length", horizon_days)
+                    final_ret = chronos["predicted_return_pct"]
+                    if plen > 0 and final_ret is not None:
+                        daily_inc = [final_ret / plen] * plen
+                        cum_chronos = np.cumsum(daily_inc).tolist()
+                        h_len = len(daily) if daily else len(cum_chronos)
+                        cum_chronos = cum_chronos[:h_len]
+                        y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
+                        fig_daily.add_trace(go.Scatter(
+                            x=x_vals[:len(y_chronos)], y=y_chronos,
+                            mode="lines", name="Chronos-2",
+                            line=dict(color="#f97316", width=2, dash="dot"),
+                            opacity=0.85,
+                            hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
+                        ))
