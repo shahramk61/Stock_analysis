@@ -56,35 +56,39 @@ def generate_report(data, scores, mc_result, profile):
     if "error" not in ensemble:
         print(f"• Ensemble (NHITS+TFT+PatchTST): {ensemble.get('predicted_return_pct', ensemble.get('predicted_5d_return_pct', 0))}% (5d) | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}%")
     
-    # Multi-Horizon Forecasts (5d / 10d / 15d / 20d) — per-model breakdown
+    # === IMPROVED MULTI-HORIZON SECTION (v4.10) ===
     multi = signals.get('multi_horizon_forecasts', {})
     if "error" not in multi and "horizons" in multi:
-        print("\n📅 Multi-Horizon Forecasts (5d / 10d / 15d / 20d):")
-        model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
-        # Header row
-        header = f"   {'Horizon':>8}  {'Avg':>7}  {'Dir':<14}  {'Uncert':>8}  " + "  ".join(f"{m:>8}" for m in model_names)
-        print(f"   {'-'*len(header)}")
-        print(f"   {'Horizon':>8}  {'Avg%':>7}  {'Direction':<14}  {'±Uncert':>8}  " + "  ".join(f"{m:>8}" for m in model_names))
-        print(f"   {'-'*len(header)}")
+        print("\n📅 Multi-Horizon Forecasts (5d / 10d / 15d / 20d) — Ensemble of 5 SOTA Models")
+        print("-" * 100)
+        print(f"{'Horizon':<6} {'Median%':<8} {'Direction':<12} {'±Uncert':<9} {'Avg%':<7} {'NHITS':<7} {'TFT':<7} {'PatchTST':<9} {'NBEATS':<8} {'TCN':<8} Outliers")
+        print("-" * 100)
+
         for h in ["5d", "10d", "15d", "20d"]:
             if h in multi["horizons"]:
                 h_data = multi["horizons"][h]
-                if "error" in h_data:
-                    print(f"   {h:>8}  {'N/A':>7}  {'Error':<14}  {'N/A':>8}")
-                    continue
-                avg = h_data.get('predicted_return_pct', 0)
-                direction = h_data.get('direction', 'N/A')
-                uncert = h_data.get('model_disagreement', 0)
-                model_preds = h_data.get('model_predictions', {})
-                per_model = "  ".join(
-                    f"{model_preds[m]:>+7.1f}%" if m in model_preds else f"{'N/A':>8}"
-                    for m in model_names
-                )
-                print(f"   {h:>8}  {avg:>+6.1f}%  {direction:<14}  ±{uncert:>6.2f}%  {per_model}")
-        print(f"   {'-'*len(header)}")
-        print(f"   Trend: {multi.get('trend_signal', 'N/A')}  |  Consensus: {multi.get('consensus_direction', 'N/A')}")
+                models = h_data.get("per_model", {})
+
+                median_ret = h_data.get("median_return_pct", h_data.get("predicted_return_pct", 0))
+                avg_ret = h_data.get("avg_return_pct", 0)
+                direction = h_data.get("direction", "Neutral ➕")
+                uncert = h_data.get("model_disagreement", 0)
+
+                outlier_note = ""
+                tcn_val = models.get("TCN", 0)
+                if h == "5d" and abs(tcn_val) > 4.0:
+                    outlier_note = "⚠️ TCN Bearish Outlier"
+                elif abs(tcn_val) > 3.0:
+                    outlier_note = "⚠️ TCN outlier"
+
+                print(f"{h:<6} {median_ret:+6.1f}%  {direction:<12} ±{uncert:4.1f}%   {avg_ret:+6.1f}%  "
+                      f"{models.get('NHITS',0):+6.1f}% {models.get('TFT',0):+6.1f}% {models.get('PatchTST',0):+6.1f}% "
+                      f"{models.get('NBEATS',0):+6.1f}% {tcn_val:+6.1f}%  {outlier_note}")
+
+        print("-" * 100)
+        print(f"Overall Trend: {multi.get('trend_signal', 'N/A')} | Consensus: {multi.get('consensus_direction', 'Neutral ➕')}")
     else:
-        print(f"\n📅 Multi-Horizon: {multi.get('error', 'N/A')}")
+        print(f"\n📅 Multi-Horizon Forecasts: {multi.get('error', 'Not available')}")
     
     print(f"\n📈 Monte Carlo (12 months): Median ${mc_result['median']:.2f}  |  Range: ${mc_result['p10']:.2f} – ${mc_result['p90']:.2f}")
     print(f"\n{'='*80}\n")

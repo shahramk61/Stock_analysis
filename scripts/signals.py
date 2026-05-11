@@ -811,15 +811,19 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = [5, 10, 15, 20]):
                 continue
 
             avg_return = round(np.mean(model_preds), 2)
+            median_return = round(float(np.median(model_preds)), 2)
             direction = "Bullish 📈" if avg_return > 1.5 else ("Bearish 📉" if avg_return < -1.5 else "Neutral ➕")
-            std_dev = round(np.std(model_preds), 2)  # disagreement = uncertainty
+            std_dev = round(np.std(model_preds), 2)
 
             results[f"{h}d"] = {
                 "predicted_return_pct": avg_return,
+                "avg_return_pct": avg_return,
+                "median_return_pct": median_return,
                 "direction": direction,
                 "model_disagreement": std_dev,
                 "num_models": len(model_preds),
-                "model_predictions": {name: round(ret, 2) for name, ret in model_preds_named}
+                "per_model": {name: round(ret, 2) for name, ret in model_preds_named},
+                "model_predictions": {name: round(ret, 2) for name, ret in model_preds_named},
             }
 
         # Extra signals for trading bot
