@@ -225,10 +225,10 @@ if run_btn:
 
     # TAB 3 — GPU / DL
     with tabs[3]:
-        lstm    = sig.get('lstm',{})
-        chronos = sig.get('chronos',{})
-        finbert = sig.get('finbert',{})
-        dl      = sig.get('dl_ensemble',{})
+        lstm    = sig.get('lstm', sig.get('lstm_forecast', {}))
+        chronos = sig.get('chronos', sig.get('chronos_forecast', {}))
+        finbert = sig.get('finbert', sig.get('finbert_sentiment', {}))
+        dl      = sig.get('dl_ensemble', sig.get('ensemble_forecast', {}))
         c1,c2,c3,c4 = st.columns(4)
         with c1:
             st.markdown("**LSTM (next-day)**")
@@ -286,7 +286,7 @@ if run_btn:
                 st.metric("5-Day Forecast",  f"{p_:+.2f}%")
                 st.metric("Direction",       f"{e} {d_}")
                 st.metric("Uncertainty",     f"±{dl.get('uncertainty_pct',0):.2f}%")
-                st.metric("Models",          f"{dl.get('models_used',0)}/3 succeeded")
+                st.metric("Models",          f"{dl.get('models_used',0)}/5 succeeded")
                 st.caption(f"Device: `{dl.get('device_used','?')}`")
                 comps = dl.get('components',{})
                 if comps:
