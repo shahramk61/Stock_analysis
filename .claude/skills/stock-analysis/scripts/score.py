@@ -5,7 +5,8 @@ from signals import (get_iv_rank_and_skew, calculate_altman_beneish, get_earning
                      get_momentum_and_52w_high, get_quality_accruals_gross_profit,
                      get_amihud_illiquidity, get_share_turnover, get_volume_price_correlation,
                      get_simple_formulaic_alpha, get_obv, get_chaikin_money_flow,
-                     get_lstm_forecast, get_finbert_sentiment, get_nhits_tft_patchtst_ensemble)
+                     get_lstm_forecast, get_chronos_forecast, get_finbert_sentiment,
+                     get_nhits_tft_patchtst_ensemble)
 from dcf import calculate_dcf
 from gpu_utils import gpu_available
 
@@ -36,9 +37,10 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
 
     # ── GPU signals (with CPU fallback) ──────────────────────────────────────
     gpu = gpu_available()
-    print(f"{'🖥️  Running GPU signals (LSTM, FinBERT, NHITS+TFT+PatchTST+N-BEATS+TCN Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
+    print(f"{'🖥️  Running GPU signals (LSTM, Chronos-2, FinBERT, 5-model Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
 
     lstm        = get_lstm_forecast(ticker)
+    chronos     = get_chronos_forecast(ticker)
     finbert     = get_finbert_sentiment(ticker)
     dl_ensemble = get_nhits_tft_patchtst_ensemble(ticker)
 
@@ -131,6 +133,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "formulaic_alpha": formulaic_alpha, "obv": obv, "cmf": cmf,
             # GPU signals
             "lstm":        lstm,
+            "chronos":     chronos,
             "finbert":     finbert,
             "dl_ensemble": dl_ensemble,
         }

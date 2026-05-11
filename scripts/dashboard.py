@@ -226,9 +226,10 @@ if run_btn:
     # TAB 3 — GPU / DL
     with tabs[3]:
         lstm    = sig.get('lstm',{})
+        chronos = sig.get('chronos',{})
         finbert = sig.get('finbert',{})
         dl      = sig.get('dl_ensemble',{})
-        c1,c2,c3 = st.columns(3)
+        c1,c2,c3,c4 = st.columns(4)
         with c1:
             st.markdown("**LSTM (next-day)**")
             if 'error' not in lstm:
@@ -242,6 +243,19 @@ if run_btn:
             else:
                 st.warning(lstm.get('error','?'))
         with c2:
+            st.markdown("**Chronos-2 (zero-shot, 5-day)**")
+            if 'error' not in chronos and 'predicted_5d_return_pct' in chronos:
+                p_c = chronos.get('predicted_5d_return_pct', 0)
+                d_c = chronos.get('direction', 'N/A')
+                e_c = "🟢" if d_c=="Bullish" else ("🔴" if d_c=="Bearish" else "🟡")
+                st.metric("5-Day Forecast",  f"{p_c:+.2f}%")
+                st.metric("Direction",       f"{e_c} {d_c}")
+                st.metric("10th–90th range", f"{chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}%")
+                st.metric("Uncertainty",     f"±{chronos.get('uncertainty_pct',0):.2f}%")
+                st.caption(f"Device: `{chronos.get('device_used','?')}` | {chronos.get('model','Chronos-2')}")
+            else:
+                st.warning(chronos.get('error','not installed')[:80])
+        with c3:
             st.markdown("**FinBERT (news)**")
             n = finbert.get('num_articles',0)
             if n > 0:
@@ -262,7 +276,7 @@ if run_btn:
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No news available via yfinance.")
-        with c3:
+        with c4:
             st.markdown("**DL Ensemble (5-day)**")
             if 'error' not in dl and 'predicted_5d_return_pct' in dl:
                 p_  = dl.get('predicted_5d_return_pct',0)

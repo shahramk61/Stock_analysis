@@ -11,3 +11,4 @@ arch>=7.0.0  # GARCH volatility forecasting
 hmmlearn>=0.3.0  # Hidden Markov Model for regime detection
 streamlit>=1.28.0  # Interactive dashboard
 plotly>=5.18.0  # Interactive charts for dashboard
+chronos-forecasting>=1.0

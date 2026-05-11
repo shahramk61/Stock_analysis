@@ -511,6 +511,54 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80,
         return {"error": str(e)[:100], "direction": "Neutral", "signal_strength": 0.0, "device_used": device}
 
 
+def get_chronos_forecast(ticker: str, prediction_length: int = 5):
+    """
+    Zero-shot forecast using Amazon Chronos-2 foundation model (~120M params).
+    No per-stock training — pretrained on massive time-series corpora.
+    Runs on GPU for fast inference. First call downloads ~500MB (cached after).
+    """
+    try:
+        from chronos import Chronos2Pipeline
+        device = 'cuda' if (_TORCH_AVAILABLE and torch.cuda.is_available()) else 'cpu'
+        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device)
+
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < 50:
+            return {"error": "Insufficient history", "direction": "Neutral"}
+
+        import torch as _torch
+        context    = hist['Close'].dropna().values[-100:]
+        # Chronos2 expects (n_series, n_variates, history_length)
+        ctx_tensor = _torch.tensor(context, dtype=_torch.float32).unsqueeze(0).unsqueeze(0)
+        # predict returns list of tensors shape (n_samples, pred_len) per batch item
+        samples    = pipeline.predict(ctx_tensor, prediction_length=prediction_length)
+        # samples[0]: shape (batch=1, n_samples, pred_len) → squeeze batch dim
+        s = samples[0].squeeze(0).cpu().numpy()   # (n_samples, pred_len)
+        import numpy as _np
+        q10 = _np.percentile(s[:, -1], 10)   # last day of horizon
+        q50 = _np.percentile(s[:, -1], 50)
+        q90 = _np.percentile(s[:, -1], 90)
+
+        last_price   = float(context[-1])
+        pred_return  = float((q50 - last_price) / last_price * 100)
+        uncertainty  = float((q90 - q10) / last_price * 100)
+        direction    = "Bullish" if pred_return > 1 else ("Bearish" if pred_return < -1 else "Neutral")
+
+        return {
+            "predicted_5d_return_pct": round(pred_return, 2),
+            "lower_10pct":  round(float((q10 - last_price) / last_price * 100), 2),
+            "upper_90pct":  round(float((q90 - last_price) / last_price * 100), 2),
+            "uncertainty_pct": round(uncertainty, 2),
+            "direction":    direction,
+            "model":        "Chronos-2 (120M, zero-shot)",
+            "device_used":  device,
+        }
+    except ImportError:
+        return {"error": "chronos-forecasting not installed", "direction": "Neutral"}
+    except Exception as e:
+        return {"error": str(e)[:120], "direction": "Neutral"}
+
+
 def get_finbert_sentiment(ticker: str, max_news: int = 10):
     """FinBERT news sentiment. GPU-accelerated inference on RTX 5080."""
     try:

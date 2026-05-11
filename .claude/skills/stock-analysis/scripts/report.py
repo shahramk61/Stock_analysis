@@ -40,12 +40,17 @@ def generate_report(data, scores, mc_result, profile):
     # GPU / DL signals
     lstm = signals.get('lstm', {})
     finbert = signals.get('finbert', {})
-    dl = signals.get('dl_ensemble', {})
+    dl      = signals.get('dl_ensemble', {})
+    chronos = signals.get('chronos', {})
     print(f"\n🖥️  GPU / Deep Learning Signals:")
     if 'error' not in lstm:
         print(f"• LSTM Forecast    : {lstm.get('predicted_next_return_pct', 0):+.2f}% next day → {lstm.get('direction','N/A')} (strength: {lstm.get('signal_strength',0):.0f}/100, device: {lstm.get('device_used','?')})")
     else:
         print(f"• LSTM Forecast    : unavailable ({lstm.get('error','?')})")
+    if 'error' not in chronos and 'predicted_5d_return_pct' in chronos:
+        print(f"• Chronos-2 Fcst   : {chronos.get('predicted_5d_return_pct',0):+.2f}% (5d) → {chronos.get('direction','N/A')} | range: {chronos.get('lower_10pct',0):+.1f}% to {chronos.get('upper_90pct',0):+.1f}% | device: {chronos.get('device_used','?')}")
+    else:
+        print(f"• Chronos-2 Fcst   : unavailable ({chronos.get('error','not installed')})")
     if 'error' not in finbert:
         print(f"• FinBERT Sentiment: {finbert.get('overall_sentiment','N/A')} (score: {finbert.get('sentiment_score',50):.0f}/100, {finbert.get('num_articles',0)} articles, device: {finbert.get('device_used','?')})")
     else:
