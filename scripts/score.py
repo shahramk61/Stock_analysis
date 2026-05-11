@@ -6,7 +6,6 @@ from signals import (
     get_rolling_beta,
     get_monte_carlo_risk,
     get_lstm_forecast,
-    get_chronos_forecast,
 )
 from dcf import calculate_dcf
 
@@ -21,7 +20,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     dcf_val          = calculate_dcf(data)
     risk             = get_monte_carlo_risk(ticker)
     lstm_forecast    = get_lstm_forecast(ticker)
-    chronos_forecast = get_chronos_forecast(ticker)
+    chronos_forecast = {}
 
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
@@ -32,9 +31,8 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     ))
 
     technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100)))
-    lstm_boost     = lstm_forecast.get('predicted_return_pct', 0) * 0.6
-    chronos_boost  = chronos_forecast.get('predicted_return_pct', 0) * 0.3
-    technicals = min(95, max(30, technicals + lstm_boost + chronos_boost))
+    lstm_boost = lstm_forecast.get('predicted_return_pct', 0) * 0.6
+    technicals = min(95, max(30, technicals + lstm_boost))
 
     valuation  = min(95, max(30, 60 + (dcf_upside * 0.3)))
     sentiment  = min(95, max(30, 50 + (earnings.get('avg_surprise_pct', 0) * 0.5)))
