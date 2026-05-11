@@ -105,7 +105,18 @@ def dcf_heatmap(dcf):
 
 st.title("📊 Stock Analysis Dashboard")
 
-if not run_btn and not compare_btn:
+# Persist analysis results across reruns (radio clicks, expanders, etc.)
+if run_btn:
+    with st.spinner(f"Analyzing {ticker}... (GPU signals may take 2-3 min)"):
+        try:
+            data, scores, mc12, mc36 = run_analysis(ticker, profile, use_gpu)
+            st.session_state['results'] = (data, scores, mc12, mc36)
+            st.session_state['ready']   = True
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
+            st.stop()
+
+if not st.session_state.get('ready') and not compare_btn:
     st.info("👈 Enter a ticker and click **Run Analysis** to get started.")
     st.markdown("""
     **20+ signals including:**
@@ -117,14 +128,8 @@ if not run_btn and not compare_btn:
     """)
     st.stop()
 
-
-if run_btn:
-    with st.spinner(f"Analyzing {ticker}... (GPU signals may take 2-3 min)"):
-        try:
-            data, scores, mc12, mc36 = run_analysis(ticker, profile, use_gpu)
-        except Exception as e:
-            st.error(f"Analysis failed: {e}")
-            st.stop()
+if st.session_state.get('ready'):
+    data, scores, mc12, mc36 = st.session_state['results']
 
     sig   = scores['signals']
     price = data['current_price']
