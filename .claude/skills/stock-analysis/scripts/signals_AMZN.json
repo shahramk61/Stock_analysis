@@ -1,0 +1,162 @@
+{
+  "timestamp": "2026-05-10T15:37:41.302200",
+  "ticker": "AMZN",
+  "current_price": 272.68,
+  "overall_score": 47.1,
+  "profile": "Balanced",
+  "recommendation": "SELL",
+  "confidence": 0.47,
+  "signals": {
+    "ivr": {
+      "ivr": 39.8,
+      "skew": -0.031,
+      "iv": 39.8,
+      "put_call_ratio": 0.76
+    },
+    "distress": {
+      "z_score": 1.95,
+      "m_score": -2.5,
+      "risk_level": "Grey"
+    },
+    "earnings": {
+      "avg_surprise_pct": 26.19,
+      "post_earnings_drift": 1.8
+    },
+    "beta": {
+      "beta": 1.358,
+      "alpha": -0.0395,
+      "r_squared": 0.498
+    },
+    "dcf": {
+      "available": true,
+      "intrinsic": 12.69,
+      "upside_pct": -95.3,
+      "base_fcf": 7.7,
+      "g1": 12.4,
+      "wacc": 12.17,
+      "ke": 12.57,
+      "kd": 5.5,
+      "terminal_growth": 2.5,
+      "stage1_years": 5,
+      "stage2_years": 5,
+      "projected_fcfs": [
+        8.65,
+        9.72,
+        10.92,
+        12.27,
+        13.79,
+        15.23,
+        16.51,
+        17.58,
+        18.36,
+        18.82
+      ],
+      "sensitivity": {
+        "0.1117": {
+          "0.015": 13.29,
+          "0.02": 13.78,
+          "0.025": 14.32,
+          "0.03": 14.92,
+          "0.035": 15.61
+        },
+        "0.1167": {
+          "0.015": 12.56,
+          "0.02": 12.99,
+          "0.025": 13.46,
+          "0.03": 13.99,
+          "0.035": 14.58
+        },
+        "0.1217": {
+          "0.015": 11.9,
+          "0.02": 12.28,
+          "0.025": 12.69,
+          "0.03": 13.15,
+          "0.035": 13.66
+        },
+        "0.1267": {
+          "0.015": 11.3,
+          "0.02": 11.63,
+          "0.025": 12.0,
+          "0.03": 12.4,
+          "0.035": 12.85
+        },
+        "0.1317": {
+          "0.015": 10.75,
+          "0.02": 11.05,
+          "0.025": 11.38,
+          "0.03": 11.73,
+          "0.035": 12.13
+        }
+      },
+      "wacc_range": [
+        0.11170000000000001,
+        0.1167,
+        0.1217,
+        0.1267,
+        0.1317
+      ],
+      "tg_range": [
+        0.015,
+        0.02,
+        0.025,
+        0.03,
+        0.035
+      ]
+    },
+    "piotroski": 5,
+    "atr_vol": {
+      "atr_percent": 2.7,
+      "current_vol": 21.3,
+      "vol_clustering": "Low",
+      "risk_level": "Normal"
+    },
+    "rs": {
+      "rs_spy": -0.5,
+      "rs_sector": -0.5,
+      "outperforming_spy": false,
+      "outperforming_sector": false
+    },
+    "regime": {
+      "regime": "Neutral",
+      "current_state": 0,
+      "probs": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "means": [
+        0.002,
+        0.0006,
+        0.0038
+      ]
+    },
+    "garch": {
+      "garch_vol_forecast": 1.87,
+      "historical_vol": 2.02,
+      "vol_ratio": 0.93
+    }
+  },
+  "monte_carlo": {
+    "current_price": 272.68,
+    "drift": 0.0,
+    "vol": 32.13564480157907,
+    "days": 252,
+    "paths": 10000,
+    "median": 258.16661144031286,
+    "p10": 172.03235912509004,
+    "p90": 388.26031825795235,
+    "mean": 271.7576161462251,
+    "prob_up_20": 22.48,
+    "prob_up_10": 31.94,
+    "prob_stop_hit": 64.52,
+    "prob_negative": 56.79,
+    "stop_price": 231.778,
+    "stop_loss_pct": 15.0
+  },
+  "suggested_action": {
+    "action": "BUY",
+    "risk_percent": 1.5,
+    "stop_loss": 231.78,
+    "take_profit": 258.17
+  }
+}
