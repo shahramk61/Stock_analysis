@@ -210,4 +210,241 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
         return {"predicted_return_pct": round(final_pred * 100, 2), "direction": direction, "prediction_length": prediction_length, "all_predictions": [round(p * 100, 2) for p in predictions], "device_used": device, "model": f"LSTM ({prediction_length}d)"}
     except Exception as e: return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
 
-# Note: Full file not replaced to avoid errors - only key LSTM function updated in this commit. Other functions remain unchanged.
+
+# ── Optional GPU / ML dependencies ──────────────────────────────────────────
+try:
+    from neuralforecast import NeuralForecast
+    from neuralforecast.models import NHITS, TFT, PatchTST, NBEATS, TCN
+    from neuralforecast.losses.pytorch import MAE
+    _NF_AVAILABLE = True
+except ImportError:
+    _NF_AVAILABLE = False
+
+def _gpu_device():
+    if torch.cuda.is_available():
+        try:
+            torch.tensor([1.0]).cuda()
+            return 'cuda'
+        except Exception:
+            pass
+    return 'cpu'
+
+
+def get_chronos_forecast(ticker: str, prediction_length: int = 5):
+    try:
+        from chronos import Chronos2Pipeline
+        device_map = "cuda" if torch.cuda.is_available() else "cpu"
+        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device_map)
+        hist = yf.Ticker(ticker).history(period="2y")
+        if len(hist) < 50: return {"error": "Insufficient data"}
+        context = hist['Close'].dropna().values[-100:].tolist()
+        last_price = context[-1]
+        try:
+            forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
+            q10, q50, q90 = forecast[0].cpu().numpy(), forecast[1].cpu().numpy(), forecast[2].cpu().numpy()
+        except TypeError:
+            ctx_t = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            samples = pipeline.predict(ctx_t, prediction_length=prediction_length)
+            s = samples[0].squeeze(0).cpu().numpy()
+            q10 = np.percentile(s[:, -1], 10)
+            q50 = np.percentile(s[:, -1], 50)
+            q90 = np.percentile(s[:, -1], 90)
+        pred_return = float((float(q50 if np.ndim(q50)==0 else q50[-1]) - last_price) / last_price * 100)
+        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        q10v = float(q10 if np.ndim(q10)==0 else q10[-1])
+        q90v = float(q90 if np.ndim(q90)==0 else q90[-1])
+        return {"predicted_return_pct": round(pred_return, 2), "direction": direction,
+                "prediction_length": prediction_length,
+                "uncertainty_range_pct": round((q90v - q10v) / last_price * 100, 1),
+                "lower_10pct": round((q10v - last_price) / last_price * 100, 2),
+                "upper_90pct": round((q90v - last_price) / last_price * 100, 2),
+                "model": "Chronos-2", "device_used": device_map}
+    except Exception as e:
+        return {"error": str(e)[:150], "direction": "Neutral"}
+
+
+def get_finbert_sentiment(ticker: str, max_news: int = 10):
+    try:
+        from transformers import pipeline as hf_pipeline
+        device = 0 if torch.cuda.is_available() else -1
+        nlp = hf_pipeline("sentiment-analysis", model="ProsusAI/finbert",
+                          tokenizer="ProsusAI/finbert", device=device)
+        news = getattr(yf.Ticker(ticker), "news", []) or []
+        titles = [n.get("title","").strip() for n in
+                  sorted(news, key=lambda x: x.get("providerPublishTime", 0), reverse=True)[:max_news]
+                  if n.get("title") and len(n.get("title","")) > 5]
+        if not titles:
+            return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                    "num_articles": 0, "note": "No news available"}
+        results = nlp(titles, batch_size=min(8, len(titles)))
+        pos = sum(1 for r in results if r["label"] == "positive")
+        neu = sum(1 for r in results if r["label"] == "neutral")
+        total = len(results)
+        score = (pos*100 + neu*50) / total
+        overall = "Positive" if score >= 65 else ("Negative" if score <= 35 else "Neutral")
+        return {"overall_sentiment": overall, "sentiment_score": round(score, 1),
+                "positive_pct": round(pos/total*100, 1),
+                "negative_pct": round((total-pos-neu)/total*100, 1),
+                "num_articles": total,
+                "device_used": "cuda" if device == 0 else "cpu",
+                "model": "ProsusAI/finbert"}
+    except ImportError:
+        return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                "num_articles": 0, "note": "transformers not installed"}
+    except Exception as e:
+        return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                "num_articles": 0, "error": str(e)[:100]}
+
+
+def _nf_forecast(ticker: str, ModelClass, model_name: str,
+                 prediction_length: int = 5, input_size: int = 120,
+                 epochs: int = 50, extra_kwargs: dict = None):
+    if not _NF_AVAILABLE:
+        return {"error": "neuralforecast not installed", "direction": "Neutral"}
+    device = _gpu_device()
+    if device == 'cuda':
+        torch.set_float32_matmul_precision('high')
+    try:
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < 100:
+            return {"error": "Insufficient history", "direction": "Neutral"}
+        df = pd.DataFrame({"unique_id": "stock",
+                           "ds": hist.index.tz_localize(None),
+                           "y": hist["Close"].values})
+        kwargs = dict(h=prediction_length, input_size=input_size,
+                      max_steps=epochs, learning_rate=0.001,
+                      loss=MAE(), valid_loss=MAE(),
+                      early_stop_patience_steps=10, batch_size=32,
+                      windows_batch_size=512, random_seed=42)
+        if extra_kwargs:
+            kwargs.update(extra_kwargs)
+        nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
+        nf.fit(df=df, val_size=max(prediction_length, int(len(df) * 0.1)))
+        pred_val = nf.predict()[model_name].values[-1]
+        last_price = hist["Close"].iloc[-1]
+        pred_return = round((pred_val / last_price - 1) * 100, 2)
+        direction = "Bullish" if pred_return > 1 else ("Bearish" if pred_return < -1 else "Neutral")
+        return {"predicted_return_pct": round(float(pred_return), 2),
+                "direction": direction, "model": model_name, "device_used": device}
+    except Exception as e:
+        return {"error": str(e)[:150], "direction": "Neutral"}
+
+
+def get_nhits_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
+    return _nf_forecast(ticker, NHITS, "NHITS", prediction_length, input_size, epochs)
+
+def get_patchtst_forecast(ticker: str, prediction_length: int = 5, input_size: int = 120, epochs: int = 50):
+    return _nf_forecast(ticker, PatchTST, "PatchTST", prediction_length, input_size, epochs,
+                        extra_kwargs={"hidden_size": 128, "n_heads": 4})
+
+def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
+    results, preds = {}, []
+    for name, fn, extra in [
+        ("nhits",    NHITS,    {}),
+        ("tft",      TFT,      {"hidden_size": 128, "n_head": 4}),
+        ("patchtst", PatchTST, {"hidden_size": 128, "n_heads": 4}),
+        ("nbeats",   NBEATS,   {}),
+        ("tcn",      TCN,      {}),
+    ]:
+        r = _nf_forecast(ticker, {"nhits": NHITS, "tft": TFT, "patchtst": PatchTST,
+                                   "nbeats": NBEATS, "tcn": TCN}[name],
+                         name.upper(), prediction_length, extra_kwargs=extra or None)
+        results[name] = r
+        if "predicted_return_pct" in r:
+            preds.append(float(r["predicted_return_pct"]))
+    if not preds:
+        return {"error": "All ensemble models failed", "direction": "Neutral"}
+    ensemble    = round(float(sum(preds) / len(preds)), 2)
+    uncertainty = round(float((max(preds) - min(preds)) / 2), 2)
+    direction   = "Bullish" if ensemble > 1 else ("Bearish" if ensemble < -1 else "Neutral")
+    return {"predicted_return_pct": ensemble, "direction": direction,
+            "uncertainty_pct": uncertainty, "components": results,
+            "models_used": len(preds),
+            "device_used": results.get("nhits", {}).get("device_used", "cpu")}
+
+
+def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
+    if horizons is None:
+        horizons = [5, 10, 15, 20]
+    if not _NF_AVAILABLE:
+        return {"error": "neuralforecast not installed", "horizons": {}}
+    device = _gpu_device()
+    if device == 'cuda':
+        torch.set_float32_matmul_precision('high')
+    try:
+        hist = yf.Ticker(ticker).history(period="5y")
+        if len(hist) < 100:
+            return {"error": "Insufficient history", "horizons": {}}
+        df = pd.DataFrame({"unique_id": "stock",
+                           "ds": hist.index.tz_localize(None),
+                           "y": hist["Close"].values})
+        last_price = float(hist["Close"].iloc[-1])
+        results = {}
+
+        for h in horizons:
+            model_preds, model_preds_named, model_daily_preds = [], [], {}
+            for ModelClass, name, extra in [
+                (NHITS,    "NHITS",    {}),
+                (TFT,      "TFT",      {"hidden_size": 128, "n_head": 4}),
+                (PatchTST, "PatchTST", {"hidden_size": 128, "n_heads": 4}),
+                (NBEATS,   "NBEATS",   {}),
+                (TCN,      "TCN",      {}),
+            ]:
+                try:
+                    kwargs = dict(h=h, input_size=120, max_steps=40, learning_rate=0.001,
+                                  loss=MAE(), valid_loss=MAE(), early_stop_patience_steps=8,
+                                  batch_size=32, windows_batch_size=512, random_seed=42)
+                    kwargs.update(extra)
+                    nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
+                    nf.fit(df=df, val_size=max(h, int(len(df) * 0.1)))
+                    pred_prices  = nf.predict()[name].values
+                    daily_returns = [round((float(p) - last_price) / last_price * 100, 3) for p in pred_prices]
+                    final_return  = daily_returns[-1]
+                    model_preds.append(final_return)
+                    model_preds_named.append((name, final_return))
+                    model_daily_preds[name] = daily_returns
+                except Exception:
+                    continue
+
+            if not model_preds:
+                results[f"{h}d"] = {"error": "All models failed"}
+                continue
+
+            avg_ret    = round(float(np.mean(model_preds)), 2)
+            median_ret = round(float(np.median(model_preds)), 2)
+            std_dev    = round(float(np.std(model_preds)), 2)
+            direction  = "Bullish 📈" if avg_ret > 1.5 else ("Bearish 📉" if avg_ret < -1.5 else "Neutral ➕")
+            all_daily  = list(model_daily_preds.values())
+            n_days     = min(len(d) for d in all_daily) if all_daily else 0
+            daily_median = [round(float(np.median([d[i] for d in all_daily])), 3) for i in range(n_days)]
+            daily_avg    = [round(float(np.mean([d[i] for d in all_daily])), 3) for i in range(n_days)]
+            daily_prices = [round(last_price * (1 + r / 100), 2) for r in daily_median]
+            per_model_daily_prices = {n: [round(last_price * (1 + r / 100), 2) for r in rets]
+                                      for n, rets in model_daily_preds.items()}
+            forecast_dates = [str(d.date()) for d in pd.bdate_range(
+                start=pd.Timestamp.today() + pd.Timedelta(days=1), periods=len(daily_median))]
+
+            results[f"{h}d"] = {
+                "predicted_return_pct": avg_ret, "avg_return_pct": avg_ret,
+                "median_return_pct": median_ret, "direction": direction,
+                "model_disagreement": std_dev, "num_models": len(model_preds),
+                "per_model": {n: round(r, 2) for n, r in model_preds_named},
+                "model_predictions": {n: round(r, 2) for n, r in model_preds_named},
+                "daily_forecasts": daily_median, "daily_avg_forecasts": daily_avg,
+                "daily_prices": daily_prices, "per_model_daily": model_daily_preds,
+                "per_model_daily_prices": per_model_daily_prices,
+                "forecast_dates": forecast_dates, "last_price": round(last_price, 2),
+            }
+
+        valid_rets = [results[f"{h}d"]["predicted_return_pct"] for h in horizons
+                      if f"{h}d" in results and "predicted_return_pct" in results[f"{h}d"]]
+        trend = ("Accelerating Bullish" if len(valid_rets) >= 2 and valid_rets[-1] > valid_rets[0] + 2 else
+                 "Accelerating Bearish" if len(valid_rets) >= 2 and valid_rets[-1] < valid_rets[0] - 2 else "Stable")
+        dirs = [results[f"{h}d"]["direction"] for h in horizons
+                if f"{h}d" in results and "direction" in results[f"{h}d"]]
+        consensus = max(set(dirs), key=dirs.count) if dirs else "Neutral"
+        return {"horizons": results, "consensus_direction": consensus,
+                "trend_signal": trend, "device_used": device,
+                "model": "Multi-Horizon (NHITS+TFT+PatchTST+N-BEATS+TCN)"}
+    except Exception as e:
+        return {"error": str(e)[:150], "horizons": {}}

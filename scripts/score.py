@@ -6,6 +6,12 @@ from signals import (
     get_rolling_beta,
     get_monte_carlo_risk,
     get_lstm_forecast,
+    get_chronos_forecast,
+    get_nhits_forecast,
+    get_patchtst_forecast,
+    get_nhits_tft_patchtst_ensemble,
+    get_finbert_sentiment,
+    get_multi_horizon_forecasts,
 )
 from dcf import calculate_dcf
 
@@ -20,7 +26,12 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     dcf_val          = calculate_dcf(data)
     risk             = get_monte_carlo_risk(ticker)
     lstm_forecast    = get_lstm_forecast(ticker)
-    chronos_forecast = {}
+    chronos_forecast = get_chronos_forecast(ticker)
+    nhits_forecast   = get_nhits_forecast(ticker)
+    patchtst_forecast = get_patchtst_forecast(ticker)
+    ensemble_forecast = get_nhits_tft_patchtst_ensemble(ticker)
+    sentiment_signal  = get_finbert_sentiment(ticker)
+    multi_horizon     = get_multi_horizon_forecasts(ticker)
 
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
 
@@ -31,11 +42,13 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     ))
 
     technicals = min(95, max(30, 60 + (iv_signal['ivr'] - 50) * 0.4 + (beta['alpha'] * 100)))
-    lstm_boost = lstm_forecast.get('predicted_return_pct', 0) * 0.6
-    technicals = min(95, max(30, technicals + lstm_boost))
+    lstm_boost     = lstm_forecast.get('predicted_return_pct', 0) * 0.6
+    chronos_boost  = chronos_forecast.get('predicted_return_pct', 0) * 0.3
+    ensemble_boost = ensemble_forecast.get('predicted_return_pct', 0) * 0.3
+    technicals = min(95, max(30, technicals + lstm_boost + chronos_boost + ensemble_boost))
 
     valuation  = min(95, max(30, 60 + (dcf_upside * 0.3)))
-    sentiment  = min(95, max(30, 50 + (earnings.get('avg_surprise_pct', 0) * 0.5)))
+    sentiment  = min(95, max(30, sentiment_signal.get('sentiment_score', 50.0)))
     esg_quality = min(95, max(40, 70 + (10 if distress['risk_level'] == "Safe" else -15)))
     risk_score  = min(95, max(30, 90 - risk['var_95'] * 1.5 - (risk['cvar_95'] - risk['var_95']) * 0.8))
 
@@ -61,13 +74,18 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
         "esg_quality":  round(esg_quality, 1),
         "risk":         round(risk_score, 1),
         "signals": {
-            "ivr":              iv_signal,
-            "distress":         distress,
-            "earnings":         earnings,
-            "beta":             beta,
-            "dcf":              dcf_val,
-            "mc_risk":          risk,
-            "lstm_forecast":    lstm_forecast,
-            "chronos_forecast": chronos_forecast,
+            "ivr":                    iv_signal,
+            "distress":               distress,
+            "earnings":               earnings,
+            "beta":                   beta,
+            "dcf":                    dcf_val,
+            "mc_risk":                risk,
+            "lstm_forecast":          lstm_forecast,
+            "chronos_forecast":       chronos_forecast,
+            "nhits_forecast":         nhits_forecast,
+            "patchtst_forecast":      patchtst_forecast,
+            "ensemble_forecast":      ensemble_forecast,
+            "finbert_sentiment":      sentiment_signal,
+            "multi_horizon_forecasts": multi_horizon,
         }
     }
