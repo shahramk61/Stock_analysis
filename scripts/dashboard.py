@@ -411,6 +411,65 @@ if st.session_state.get('ready'):
                         ),
                     ))
 
+                # ── Weighted Means (per-day from per_model_daily) ──
+                def _weighted_daily(weights_dict, pm_daily):
+                    """Compute per-day weighted mean using available models."""
+                    avail = {n: pm_daily[n] for n in weights_dict if n in pm_daily and pm_daily[n]}
+                    if not avail:
+                        return None
+                    n_days = min(len(v) for v in avail.values())
+                    total_w = sum(weights_dict[n] for n in avail)
+                    if total_w <= 0:
+                        return None
+                    out = []
+                    for i in range(n_days):
+                        s = sum(avail[n][i] * weights_dict[n] for n in avail)
+                        out.append(round(s / total_w, 3))
+                    return out
+
+                # Static weighted mean — pink dashed
+                sw = multi.get("static_weights", {})
+                wstat_daily = _weighted_daily(sw, pm_d) if sw and pm_d else None
+                if wstat_daily:
+                    if use_price:
+                        wstat_px = [round(last_px * (1 + r / 100), 2) for r in wstat_daily]
+                        y_wstat = [last_px] + wstat_px
+                    else:
+                        y_wstat = [0.0] + wstat_daily
+                    fig_daily.add_trace(go.Scatter(
+                        x=x_vals[:len(y_wstat)], y=y_wstat,
+                        mode="lines", name="Weighted (Static)",
+                        line=dict(color="#ec4899", width=2.5, dash="dashdot"),
+                        opacity=0.95,
+                        hovertemplate=(
+                            "<b>Weighted Static</b><br>%{x}<br>"
+                            + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
+                            + "<extra></extra>"
+                        ),
+                    ))
+
+                # Dynamic weighted mean — gold solid
+                dwi = multi.get("dynamic_weights_info") or {}
+                dw  = dwi.get("weights", {})
+                wdyn_daily = _weighted_daily(dw, pm_d) if dw and pm_d else None
+                if wdyn_daily:
+                    if use_price:
+                        wdyn_px = [round(last_px * (1 + r / 100), 2) for r in wdyn_daily]
+                        y_wdyn = [last_px] + wdyn_px
+                    else:
+                        y_wdyn = [0.0] + wdyn_daily
+                    fig_daily.add_trace(go.Scatter(
+                        x=x_vals[:len(y_wdyn)], y=y_wdyn,
+                        mode="lines", name="Weighted (Dynamic)",
+                        line=dict(color="#fbbf24", width=3),
+                        opacity=0.95,
+                        hovertemplate=(
+                            "<b>Weighted Dynamic</b><br>%{x}<br>"
+                            + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
+                            + "<extra></extra>"
+                        ),
+                    ))
+
                 # "Today" vertical marker (category axis uses numeric index)
                 fig_daily.add_vline(x=0, line_dash="solid", line_color="#facc15",
                                     opacity=0.8, annotation_text="◀ Today",
