@@ -60,10 +60,10 @@ def generate_report(data, scores, mc_result, profile):
     else:
         print(f"• PatchTST Forecast: {patchtst.get('error', 'N/A')}")
     
-    # NEW: NHITS/TFT Ensemble + Uncertainty (SOTA DL flagship — robust forecast with model disagreement as uncertainty)
+    # NHITS + TFT + PatchTST Ensemble (all 3 SOTA models)
     ensemble = signals.get('ensemble_forecast', {})
     if "error" not in ensemble:
-        print(f"• Ensemble Forecast: {ensemble.get('predicted_5d_return_pct', 0)}% (5d) | {ensemble.get('direction', 'N/A')} | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}% (NHITS {ensemble.get('nhits_pred', 0)}% / TFT {ensemble.get('tft_pred', 0)}%) on {ensemble.get('device_used', 'cpu')}")
+        print(f"• Ensemble Forecast: {ensemble.get('predicted_5d_return_pct', 0)}% (5d) | {ensemble.get('direction', 'N/A')} | Uncertainty: ±{ensemble.get('uncertainty_pct', 0)}% ({ensemble.get('models_used', 3)} models) on {ensemble.get('device_used', 'cpu')}")
     else:
         print(f"• Ensemble Forecast: {ensemble.get('error', 'N/A')}")
     
@@ -88,7 +88,7 @@ def generate_json_report(data, scores, mc_result, profile):
         "pillars": {
             "fundamentals": scores['fundamentals'],
             "technicals": scores['technicals'],
-            "valuation": scores['valuation'],
+            "valuation": scores['validation'],
             "sentiment": scores['sentiment'],
             "esg_quality": scores['esg_quality'],
             "risk": scores.get('risk', 70)  # NEW

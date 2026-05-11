@@ -8,7 +8,7 @@ from signals import (
     get_lstm_forecast,
     get_chronos_forecast,
     get_nhits_forecast,
-    get_nhits_tft_ensemble,  # NEW: NHITS + TFT ensemble with uncertainty (SOTA DL flagship)
+    get_nhits_tft_patchtst_ensemble,  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
     get_patchtst_forecast,  # NEW: PatchTST — top-tier SOTA patch-based transformer (2024+ benchmarks)
     get_finbert_sentiment  # NEW: FinBERT news sentiment for Sentiment pillar
 )
@@ -28,7 +28,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     lstm_forecast = get_lstm_forecast(ticker)  # GPU-accelerated LSTM (local training)
     chronos_forecast = get_chronos_forecast(ticker)  # Zero-shot Chronos-2 foundation model
     nhits_forecast = get_nhits_forecast(ticker)  # SOTA NHITS
-    ensemble_forecast = get_nhits_tft_ensemble(ticker)  # NEW: NHITS/TFT ensemble + uncertainty (primary DL forecast)
+    ensemble_forecast = get_nhits_tft_patchtst_ensemble(ticker)  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
     patchtst_forecast = get_patchtst_forecast(ticker)  # NEW: PatchTST — top-tier SOTA patch-based transformer
     
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
@@ -49,7 +49,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
     patchtst_boost = patchtst_forecast.get('predicted_5d_return_pct', 0) * 0.15
     technicals = min(95, max(30, technicals + patchtst_boost))
 
-    # NEW: Strong boost from NHITS/TFT ensemble (SOTA, with uncertainty) — primary DL signal
+    # NEW: Strong boost from NHITS/TFT/PatchTST ensemble (SOTA, with uncertainty) — primary DL signal
     ensemble_boost = ensemble_forecast.get('predicted_5d_return_pct', 0) * 0.30
     technicals = min(95, max(30, technicals + ensemble_boost))
 
@@ -93,7 +93,7 @@ def calculate_pillars(data: dict, profile: str = "Balanced"):
             "lstm_forecast": lstm_forecast,
             "chronos_forecast": chronos_forecast,
             "nhits_forecast": nhits_forecast,
-            "ensemble_forecast": ensemble_forecast,  # NEW: NHITS/TFT ensemble with uncertainty (SOTA DL flagship)
+            "ensemble_forecast": ensemble_forecast,  # NHITS + TFT + PatchTST ensemble (all 3 SOTA models)
             "patchtst_forecast": patchtst_forecast,  # NEW: PatchTST — top-tier SOTA patch-based transformer
             "finbert_sentiment": sentiment_signal
         }
