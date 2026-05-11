@@ -689,7 +689,8 @@ def _nf_forecast(ticker: str, ModelClass, model_name: str,
         last_price = hist["Close"].iloc[-1]
         pred_return = round((pred_val / last_price - 1) * 100, 2)
         direction = "Bullish" if pred_return > 1 else ("Bearish" if pred_return < -1 else "Neutral")
-        return {"predicted_5d_return_pct": pred_return, "direction": direction,
+        return {"predicted_return_pct": round(float(pred_return), 2),
+                "direction": direction,
                 "model": model_name, "device_used": device}
     except Exception as e:
         return {"error": str(e)[:150], "direction": "Neutral"}
@@ -736,13 +737,15 @@ def get_nhits_tft_patchtst_ensemble(ticker: str, prediction_length: int = 5):
         r = fn(ticker, prediction_length=prediction_length)
         results[name] = r
         if "predicted_5d_return_pct" in r:
-            preds.append(r["predicted_5d_return_pct"])
+            preds.append(float(r["predicted_5d_return_pct"]))
+        elif "predicted_return_pct" in r:
+            preds.append(float(r["predicted_return_pct"]))
     if not preds:
         return {"error": "All ensemble models failed", "direction": "Neutral"}
-    ensemble    = round(sum(preds) / len(preds), 2)
-    uncertainty = round((max(preds) - min(preds)) / 2, 2)
+    ensemble    = round(float(sum(preds) / len(preds)), 2)
+    uncertainty = round(float((max(preds) - min(preds)) / 2), 2)
     direction   = "Bullish" if ensemble > 1 else ("Bearish" if ensemble < -1 else "Neutral")
-    return {"predicted_5d_return_pct": ensemble,
+    return {"predicted_return_pct": ensemble,
             "direction": direction,
             "uncertainty_pct": uncertainty,
             "components": results,
