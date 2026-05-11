@@ -198,20 +198,19 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
         model.eval()
         predictions = []
         current_seq = torch.tensor(returns[-seq_len:], dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
-        last_return = float(returns[-1])
-        for step in range(prediction_length):
+        for _ in range(prediction_length):
             with torch.no_grad():
                 next_pred = model(current_seq).item()
-                next_pred = max(min(next_pred, 0.06), -0.06)          # tighter clip (±6%)
-                decay = 0.85 ** step                                    # mean-reversion decay
-                next_pred = next_pred * decay + last_return * (1 - decay) * 0.3
+                # Safety clip only — preserves actual model behavior
+                next_pred = max(min(next_pred, 0.06), -0.06)
                 predictions.append(next_pred)
-            current_seq = torch.cat([current_seq[:, 1:, :], torch.tensor([[next_pred]], dtype=torch.float32).unsqueeze(-1).to(device)], dim=1)
+            current_seq = torch.cat([current_seq[:, 1:, :],
+                                      torch.tensor([[next_pred]], dtype=torch.float32).unsqueeze(-1).to(device)], dim=1)
         final_pred = sum(predictions)   # cumulative return over horizon
         direction = "Bullish 📈" if final_pred > 0.01 else "Bearish 📉" if final_pred < -0.01 else "Neutral ➕"
         return {"predicted_return_pct": round(final_pred * 100, 2), "direction": direction,
                 "prediction_length": prediction_length,
-                "all_predictions": [round(p * 100, 2) for p in predictions],
+                "all_predictions": [round(p * 100, 3) for p in predictions],
                 "device_used": device, "model": f"LSTM ({prediction_length}d)"}
     except Exception as e: return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
 
