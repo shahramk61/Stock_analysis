@@ -71,7 +71,7 @@ def generate_report(data, scores, mc_result, profile):
     # === MULTI-HORIZON DAILY FORECASTS (v4.11) ===
     multi = signals.get('multi_horizon_forecasts', {})
     if "error" not in multi and "horizons" in multi:
-        model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+        model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN", "LSTM", "Chronos"]
         W = 110
 
         print(f"\n{'='*W}")

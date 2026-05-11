@@ -338,9 +338,10 @@ if st.session_state.get('ready'):
     with tabs[5]:
         st.subheader("📅 Multi-Horizon Daily Forecasts — 7 SOTA Models (NHITS · TFT · PatchTST · N-BEATS · TCN · LSTM · Chronos)")
         multi = sig.get('multi_horizon_forecasts', sig.get('multi_h', {}))
-        MODEL_NAMES = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+        MODEL_NAMES = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN", "LSTM", "Chronos"]
         MODEL_COLORS = {"NHITS": "#3b82f6", "TFT": "#f59e0b", "PatchTST": "#22c55e",
-                        "NBEATS": "#a855f7", "TCN": "#ef4444"}
+                        "NBEATS": "#a855f7", "TCN": "#ef4444",
+                        "LSTM":   "#10b981", "Chronos": "#f97316"}
 
         if "error" not in multi and "horizons" in multi:
             horizons = multi["horizons"]
@@ -391,69 +392,6 @@ if st.session_state.get('ready'):
                                 + ("$%{y:.2f}" if use_price else "%{y:+.3f}%")
                                 + "<extra></extra>"
                             ),
-                        ))
-
-                # === LSTM (green dashed) — v4.20: consistent with report, fallback if extreme ===
-                horizon_days = int(sel_h.replace('d', ''))
-                lstm_dyn = None
-                try:
-                    from signals import get_lstm_forecast as _lstm_fn
-                    lstm_dyn = _lstm_fn(ticker, prediction_length=horizon_days)
-                except Exception:
-                    lstm_dyn = lstm
-                if lstm_dyn and "all_predictions" in lstm_dyn:
-                    inc = list(lstm_dyn["all_predictions"])
-                    if inc and max(abs(x) for x in inc) > 5:
-                        total = lstm_dyn.get("predicted_return_pct", 0) / 100.0
-                        inc = [total / horizon_days * (0.7 + 0.6 * (i / horizon_days)) for i in range(horizon_days)]
-                    cum_lstm = np.cumsum(inc).tolist()
-                    h_len = len(daily) if daily else len(cum_lstm)
-                    cum_lstm = cum_lstm[:h_len]
-                    y_lstm = ([0.0] + cum_lstm) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_lstm])
-                    fig_daily.add_trace(go.Scatter(
-                        x=x_vals[:len(y_lstm)], y=y_lstm,
-                        mode="lines", name="LSTM",
-                        line=dict(color="#22c55e", width=2, dash="dash"),
-                        opacity=0.9,
-                        hovertemplate=("<b>LSTM</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
-                    ))
-
-                # === Chronos-2 (orange dotted) — v4.21: real daily path from quantiles ===
-                chronos_dyn = None
-                try:
-                    from signals import get_chronos_forecast as _ch_fn
-                    chronos_dyn = _ch_fn(ticker, prediction_length=horizon_days)
-                except Exception:
-                    chronos_dyn = chronos
-                if chronos_dyn and "all_predictions" in chronos_dyn and chronos_dyn["all_predictions"]:
-                    # Real daily cumulative returns from Chronos quantile q50
-                    cum_chronos = list(chronos_dyn["all_predictions"])
-                    h_len = len(daily) if daily else len(cum_chronos)
-                    cum_chronos = cum_chronos[:h_len]
-                    y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
-                    fig_daily.add_trace(go.Scatter(
-                        x=x_vals[:len(y_chronos)], y=y_chronos,
-                        mode="lines", name="Chronos-2",
-                        line=dict(color="#f97316", width=2, dash="dot"),
-                        opacity=0.9,
-                        hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
-                    ))
-                elif chronos_dyn and "predicted_return_pct" in chronos_dyn:
-                    # Fallback: linear interpolation only if daily path unavailable
-                    plen = chronos_dyn.get("prediction_length", horizon_days)
-                    final_ret = chronos_dyn["predicted_return_pct"]
-                    if plen > 0 and final_ret is not None:
-                        daily_inc = [final_ret / plen] * plen
-                        cum_chronos = np.cumsum(daily_inc).tolist()
-                        h_len = len(daily) if daily else len(cum_chronos)
-                        cum_chronos = cum_chronos[:h_len]
-                        y_chronos = ([0.0] + cum_chronos) if not use_price else ([last_px] + [last_px * (1 + r / 100) for r in cum_chronos])
-                        fig_daily.add_trace(go.Scatter(
-                            x=x_vals[:len(y_chronos)], y=y_chronos,
-                            mode="lines", name="Chronos-2 (linear)",
-                            line=dict(color="#f97316", width=2, dash="dot"),
-                            opacity=0.6,
-                            hovertemplate=("<b>Chronos-2</b><br>%{x}<br>" + ("$%{y:.2f}" if use_price else "%{y:+.3f}%") + "<extra></extra>")
                         ))
 
                 # Ensemble median — bold, anchored

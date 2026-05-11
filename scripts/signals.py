@@ -431,6 +431,36 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                 except Exception:
                     continue
 
+            # Add LSTM (direct multi-horizon) — convert incremental → cumulative
+            try:
+                lstm_r = get_lstm_forecast(ticker, prediction_length=h)
+                if lstm_r and "all_predictions" in lstm_r and "error" not in lstm_r:
+                    lstm_inc = lstm_r["all_predictions"]
+                    lstm_cum, s = [], 0.0
+                    for v in lstm_inc:
+                        s += float(v)
+                        lstm_cum.append(round(s, 3))
+                    if lstm_cum:
+                        lstm_final = lstm_cum[-1]
+                        model_preds.append(lstm_final)
+                        model_preds_named.append(("LSTM", lstm_final))
+                        model_daily_preds["LSTM"] = lstm_cum
+            except Exception:
+                pass
+
+            # Add Chronos-2 — already cumulative (from q50 quantile)
+            try:
+                ch_r = get_chronos_forecast(ticker, prediction_length=h)
+                if ch_r and "all_predictions" in ch_r and "error" not in ch_r:
+                    ch_cum = list(ch_r["all_predictions"])
+                    if ch_cum:
+                        ch_final = ch_cum[-1]
+                        model_preds.append(ch_final)
+                        model_preds_named.append(("Chronos", ch_final))
+                        model_daily_preds["Chronos"] = ch_cum
+            except Exception:
+                pass
+
             if not model_preds:
                 results[f"{h}d"] = {"error": "All models failed"}
                 continue
