@@ -741,6 +741,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
 
         for h in horizons:
             model_preds = []
+            model_preds_named = []
             for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"),
                                      (PatchTST, "PatchTST"), (NBEATS, "NBEATS"),
                                      (TCN, "TCN")]:
@@ -758,7 +759,9 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                     val_size = max(h, int(len(df) * 0.1))
                     nf.fit(df=df, val_size=val_size)
                     pred_price  = float(nf.predict()[name].values[0])
-                    model_preds.append((pred_price - last_price) / last_price * 100)
+                    pred_return = (pred_price - last_price) / last_price * 100
+                    model_preds.append(pred_return)
+                    model_preds_named.append((name, pred_return))
                 except Exception:
                     continue
 
@@ -766,14 +769,21 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None):
                 results[f"{h}d"] = {"error": "all models failed"}
                 continue
 
-            avg_ret   = round(float(np.mean(model_preds)), 2)
-            std_dev   = round(float(np.std(model_preds)), 2)
-            direction = ("Bullish" if avg_ret > 1.5 else
-                         "Bearish" if avg_ret < -1.5 else "Neutral")
-            results[f"{h}d"] = {"predicted_return_pct": avg_ret,
-                                 "direction": direction,
-                                 "model_disagreement": std_dev,
-                                 "num_models": len(model_preds)}
+            avg_ret    = round(float(np.mean(model_preds)), 2)
+            median_ret = round(float(np.median(model_preds)), 2)
+            std_dev    = round(float(np.std(model_preds)), 2)
+            direction  = ("Bullish" if avg_ret > 1.5 else
+                          "Bearish" if avg_ret < -1.5 else "Neutral")
+            results[f"{h}d"] = {
+                "predicted_return_pct": avg_ret,
+                "avg_return_pct":       avg_ret,
+                "median_return_pct":    median_ret,
+                "direction":            direction,
+                "model_disagreement":   std_dev,
+                "num_models":           len(model_preds),
+                "per_model":            {n: round(r, 2) for n, r in model_preds_named},
+                "model_predictions":    {n: round(r, 2) for n, r in model_preds_named},
+            }
 
         valid_rets = [results[f"{h}d"]["predicted_return_pct"]
                       for h in horizons if f"{h}d" in results

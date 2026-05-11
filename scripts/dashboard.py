@@ -1,5 +1,5 @@
 """
-Stock Analysis Dashboard — v4.8
+Stock Analysis Dashboard — v4.10
 Streamlit UI for the full signal pipeline (CPU + GPU signals).
 Run: streamlit run scripts/dashboard.py
 """
@@ -21,7 +21,7 @@ st.set_page_config(
 
 with st.sidebar:
     st.title("📊 Stock Analyzer")
-    st.caption("v4.8 · GPU-accelerated · RTX 5080")
+    st.caption("v4.10 · GPU-accelerated · Multi-Horizon Ensemble")
     ticker = st.text_input("Ticker Symbol", value="AAPL", max_chars=8).upper().strip()
     profile = st.selectbox("Investor Profile", ["Balanced", "Growth", "Value", "Momentum"])
     use_gpu = st.toggle("Enable GPU Signals (LSTM + DL Ensemble)", value=True)
@@ -140,7 +140,7 @@ if run_btn:
     st.divider()
 
     tabs = st.tabs(["🎯 Overview","📈 Pillars","💰 Valuation","🖥️ GPU / DL",
-                    "📊 Monte Carlo","🔬 Deep Signals","📅 Earnings"])
+                    "📊 Monte Carlo","📅 Multi-Horizon","🔬 Deep Signals","📅 Earnings"])
 
     # TAB 0 — Overview
     with tabs[0]:
@@ -320,25 +320,77 @@ if run_btn:
         c2.metric("Stop-loss level (−15%)", f"${mc12['stop_price']:.2f}")
         st.caption(f"σ={data.get('annual_vol',0):.1f}% ann. · μ={mc12['drift']*100:.1f}% (score-derived) · 10,000 paths")
 
-    # Multi-Horizon section (bottom of GPU tab)
-    multi_h = sig.get('multi_h', {})
-    if multi_h and 'horizons' in multi_h and not multi_h.get('error'):
-        st.divider()
-        st.subheader("📅 Multi-Horizon Forecast (5d / 10d / 15d / 20d)")
-        horizons_data = multi_h.get('horizons', {})
-        cols = st.columns(len(horizons_data))
-        for i, (hd, r) in enumerate(horizons_data.items()):
-            with cols[i]:
-                if 'predicted_return_pct' in r:
-                    ret = r['predicted_return_pct']
-                    d_  = r.get('direction', 'N/A')
-                    e   = "🟢" if d_=="Bullish" else ("🔴" if d_=="Bearish" else "🟡")
-                    st.metric(f"Horizon {hd}", f"{ret:+.2f}%", delta=f"{e} {d_}")
-                    st.caption(f"Uncertainty: ±{r.get('model_disagreement',0):.2f}% | {r.get('num_models',0)}/5 models")
-        st.caption(f"Consensus: **{multi_h.get('consensus_direction','?')}** | Trend: **{multi_h.get('trend_signal','?')}** | Device: `{multi_h.get('device_used','?')}`")
-
-    # TAB 5 — Deep Signals
+    # TAB 5 — Multi-Horizon (dedicated tab)
     with tabs[5]:
+        st.subheader("📅 Multi-Horizon Forecast (5d / 10d / 15d / 20d) — Ensemble of 5 SOTA Models")
+        multi = sig.get('multi_horizon_forecasts', sig.get('multi_h', {}))
+
+        if "error" not in multi and "horizons" in multi:
+            horizons = multi["horizons"]
+
+            df_chart = pd.DataFrame([
+                {
+                    "Horizon": h,
+                    "Median Return %": horizons[h].get("median_return_pct", horizons[h].get("predicted_return_pct", 0)),
+                    "Avg Return %":    horizons[h].get("avg_return_pct", horizons[h].get("predicted_return_pct", 0)),
+                    "Uncertainty ±%":  horizons[h].get("model_disagreement", 0),
+                }
+                for h in ["5d", "10d", "15d", "20d"] if h in horizons and "error" not in horizons[h]
+            ])
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df_chart["Horizon"], y=df_chart["Median Return %"],
+                mode="lines+markers", name="Median",
+                line=dict(color="#3b82f6", width=4)))
+            fig.add_trace(go.Scatter(
+                x=df_chart["Horizon"], y=df_chart["Avg Return %"],
+                mode="lines+markers", name="Average",
+                line=dict(color="#f59e0b", dash="dash")))
+            fig.add_hline(y=0, line_dash="dash", line_color="gray")
+            fig.update_layout(
+                title="Predicted Return by Horizon",
+                xaxis_title="Forecast Horizon",
+                yaxis_title="Return %",
+                template="plotly_dark", height=420)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Per-model breakdown table
+            model_names = ["NHITS", "TFT", "PatchTST", "NBEATS", "TCN"]
+            table_rows = []
+            for h in ["5d", "10d", "15d", "20d"]:
+                if h not in horizons or "error" in horizons[h]:
+                    continue
+                h_data = horizons[h]
+                models = h_data.get("per_model", h_data.get("model_predictions", {}))
+                tcn_val = models.get("TCN", 0)
+                outlier = "⚠️ TCN outlier" if (h == "5d" and abs(tcn_val) > 4.0) or abs(tcn_val) > 3.0 else ""
+                row = {
+                    "Horizon":   h,
+                    "Median %":  f"{h_data.get('median_return_pct', h_data.get('predicted_return_pct', 0)):+.1f}%",
+                    "Avg %":     f"{h_data.get('avg_return_pct', h_data.get('predicted_return_pct', 0)):+.1f}%",
+                    "±Uncert":   f"±{h_data.get('model_disagreement', 0):.1f}%",
+                    "Direction": h_data.get("direction", "N/A"),
+                }
+                for m in model_names:
+                    row[m] = f"{models.get(m, 0):+.1f}%" if m in models else "N/A"
+                row["Outliers"] = outlier
+                table_rows.append(row)
+
+            if table_rows:
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+            st.success(
+                f"**Consensus:** {multi.get('consensus_direction', 'Neutral')}  |  "
+                f"**Trend:** {multi.get('trend_signal', 'Stable')}  |  "
+                f"Device: `{multi.get('device_used', '?')}`"
+            )
+            st.caption("✅ Median is outlier-robust. TCN flagged when |prediction| > 3–4%.")
+        else:
+            st.warning(f"Multi-horizon data not available: {multi.get('error', 'No data returned')}")
+
+    # TAB 6 — Deep Signals
+    with tabs[6]:
         c1,c2 = st.columns(2)
         with c1:
             st.markdown("**🏥 Financial Health**")
@@ -384,8 +436,8 @@ if run_btn:
                 st.metric("Simulated Vol",   f"{mcr.get('simulated_annual_vol',0):.1f}%")
                 st.metric("Annual Drift",    f"{mcr.get('annual_drift',0):+.1f}%")
 
-    # TAB 6 — Earnings
-    with tabs[6]:
+    # TAB 7 — Earnings
+    with tabs[7]:
         eh = data.get('earnings_history',{})
         if eh and eh.get('quarters'):
             df_e = pd.DataFrame([q for q in eh['quarters'] if q.get('surprise_pct') is not None])
