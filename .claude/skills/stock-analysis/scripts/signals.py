@@ -559,27 +559,48 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
     except Exception as e: return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
 
 
-def get_chronos_forecast(ticker: str, prediction_length: int = 5):
+def get_chronos_forecast(ticker: str, prediction_length: int = 5, use_covariates: bool = True):
+    """Chronos-2 with multivariate context [Close,Volume,RSI,ATR]. Falls back to univariate."""
     try:
         from chronos import Chronos2Pipeline
         device_map = "cuda" if (_TORCH_AVAILABLE and torch.cuda.is_available()) else "cpu"
         pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device_map)
         hist = yf.Ticker(ticker).history(period="2y")
         if len(hist) < 50: return {"error": "Insufficient data"}
-        context = hist['Close'].dropna().values[-100:].tolist()
-        last_price = context[-1]
-        try:
-            forecast = pipeline.predict(context, prediction_length=prediction_length, quantile_levels=[0.1, 0.5, 0.9])
-            q10_arr = np.atleast_1d(forecast[0].cpu().numpy())
-            q50_arr = np.atleast_1d(forecast[1].cpu().numpy())
-            q90_arr = np.atleast_1d(forecast[2].cpu().numpy())
-        except TypeError:
-            ctx_t = torch.tensor(context, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-            samples = pipeline.predict(ctx_t, prediction_length=prediction_length)
-            s = samples[0].squeeze(0).cpu().numpy()
-            q10_arr = np.percentile(s, 10, axis=0)
-            q50_arr = np.percentile(s, 50, axis=0)
-            q90_arr = np.percentile(s, 90, axis=0)
+
+        multivariate_used = False
+        features_used = ["Close"]
+        last_price = float(hist['Close'].dropna().values[-1])
+        forecast_tensor = None
+
+        if use_covariates and _TORCH_AVAILABLE:
+            try:
+                import pandas_ta as ta
+                df = hist[['Close', 'Volume', 'High', 'Low']].dropna().copy()
+                df['rsi'] = ta.rsi(df['Close'], length=14)
+                df['atr'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+                df = df.dropna()
+                if len(df) >= 60:
+                    context_df = df[['Close', 'Volume', 'rsi', 'atr']].tail(120)
+                    last_price = float(context_df['Close'].iloc[-1])
+                    arr = context_df.values.T.astype(np.float32)
+                    ctx_t = torch.from_numpy(arr).unsqueeze(0).to(device_map if device_map == 'cpu' else 'cuda')
+                    forecast = pipeline.predict(ctx_t, prediction_length=prediction_length)
+                    forecast_tensor = forecast[0].cpu().numpy()  # (4, 21, h)
+                    multivariate_used = True
+                    features_used = ["Close", "Volume", "RSI", "ATR"]
+            except Exception:
+                forecast_tensor = None
+
+        if forecast_tensor is None:
+            close = hist['Close'].dropna().values[-100:].astype(np.float32)
+            last_price = float(close[-1])
+            ctx_t = torch.from_numpy(close).unsqueeze(0).unsqueeze(0)
+            forecast = pipeline.predict(ctx_t, prediction_length=prediction_length)
+            forecast_tensor = forecast[0].cpu().numpy()  # (1, 21, h)
+
+        target_q = forecast_tensor[0]   # (21, h) — Close variate
+        q10_arr, q50_arr, q90_arr = target_q[2], target_q[10], target_q[18]
 
         daily_returns_q50 = [round(float((float(p) - last_price) / last_price * 100), 3) for p in q50_arr]
         daily_returns_q10 = [round(float((float(p) - last_price) / last_price * 100), 3) for p in q10_arr]
@@ -594,14 +615,16 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5):
         return {"predicted_return_pct": round(pred_return, 2),
                 "direction": direction,
                 "prediction_length": prediction_length,
-                "all_predictions":     daily_returns_q50,
-                "daily_prices":        daily_prices_q50,
-                "lower_path":          daily_returns_q10,
-                "upper_path":          daily_returns_q90,
+                "all_predictions":       daily_returns_q50,
+                "daily_prices":          daily_prices_q50,
+                "lower_path":            daily_returns_q10,
+                "upper_path":            daily_returns_q90,
                 "uncertainty_range_pct": round(q90v_last - q10v_last, 1),
-                "lower_10pct": round(q10v_last, 2),
-                "upper_90pct": round(q90v_last, 2),
-                "model": "Chronos-2", "device_used": device_map}
+                "lower_10pct":           round(q10v_last, 2),
+                "upper_90pct":           round(q90v_last, 2),
+                "features_used":         features_used,
+                "model":                 "Chronos-2 (multivariate)" if multivariate_used else "Chronos-2",
+                "device_used":           device_map}
     except Exception as e: return {"error": str(e)[:150], "direction": "Neutral"}
 
 
