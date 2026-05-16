@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Added Altman Z-Score + Beneish M-Score  
+**Status**: All non-forecasting signals added  
 **Last Updated**: 2026-05-16
 
 ---
@@ -63,6 +63,7 @@ From our `signals/` package:
 - `get_rolling_beta()`
 - `get_iv_rank_and_skew()`
 - `calculate_altman_beneish()`
+- `get_earnings_surprise()`
 
 ---
 
@@ -83,8 +84,8 @@ From our `signals/` package:
 
 - [ ] Finalize exact output schema
 - [ ] Register agent in TradingAgents graph
-- [x] All core quantitative signals added (Multi-horizon, Monte Carlo, Beta, IV Rank, Altman Z)
-- [ ] Test expanded version
+- [x] All non-forecasting quantitative signals added
+- [ ] Test full version
 
 ---
 
@@ -92,10 +93,8 @@ From our `signals/` package:
 
 | Date       | Update                                           | Status |
 |------------|--------------------------------------------------|--------|
-| 2026-05-16 | Initial design + skeleton                        | Done   |
-| 2026-05-16 | Signals integration (core + additional)          | Done   |
-| 2026-05-16 | Added Altman Z-Score + Beneish M-Score           | Done   |
+| 2026-05-16 | All non-forecasting signals integrated           | Done   |
 
 ---
 
-**Next Step**: Test the full version.
+**Next Step**: Test the complete Quantitative Analyst.

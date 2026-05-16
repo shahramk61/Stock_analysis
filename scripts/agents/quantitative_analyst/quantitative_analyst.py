@@ -27,6 +27,7 @@ def create_quantitative_analyst(llm=None):
                 get_rolling_beta,
                 get_iv_rank_and_skew,
                 calculate_altman_beneish,
+                get_earnings_surprise,
             )
             signals_available = True
         except Exception as e:
@@ -40,6 +41,7 @@ def create_quantitative_analyst(llm=None):
                 beta_data = get_rolling_beta(ticker)
                 iv_data = get_iv_rank_and_skew(ticker)
                 altman_data = calculate_altman_beneish(ticker)
+                earnings_data = get_earnings_surprise(ticker)
 
                 # Build multi-horizon table
                 multi_horizon_text = ""
@@ -86,6 +88,7 @@ Quantitative models (LSTM + Chronos-2) show the current outlook with supporting 
 - Beta (vs SPY): {beta_data.get('beta', 'N/A')} (Alpha: {beta_data.get('alpha', 'N/A')})
 - IV Rank: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')}
 - Altman Z-Score: {altman_data.get('z_score', 'N/A')} ({altman_data.get('risk_level', 'N/A')})
+- Earnings Surprise (avg): {earnings_data.get('avg_surprise_pct', 'N/A')}%
 
 **Conviction Level**: {conviction}
 
