@@ -4,6 +4,12 @@ import numpy as np
 from datetime import datetime, timedelta
 import statsmodels.api as sm
 
+try:
+    import torch
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
+
 def get_iv_rank_and_skew(ticker: str):
     stock = yf.Ticker(ticker)
     try:
@@ -99,3 +105,35 @@ def get_monte_carlo_risk(ticker: str, paths: int = 10000, horizon_days: int = 25
         return {"var_95": round(float(var_95), 1), "cvar_95": round(float(cvar_95), 1), "simulated_annual_vol": round(float(sigma * 100), 1), "annual_drift": round(float(mu * 100), 1)}
     except Exception as e:
         return {"var_95": 18.5, "cvar_95": 25.0, "simulated_annual_vol": 32.0, "annual_drift": 9.5}
+
+def get_finbert_sentiment(ticker: str, max_news: int = 10):
+    """FinBERT news sentiment. GPU-accelerated inference."""
+    try:
+        from transformers import pipeline as hf_pipeline
+        device = 0 if (_TORCH_AVAILABLE and torch.cuda.is_available()) else -1
+        nlp = hf_pipeline("sentiment-analysis", model="ProsusAI/finbert",
+                           tokenizer="ProsusAI/finbert", device=device)
+        news = getattr(yf.Ticker(ticker), "news", []) or []
+        titles = [n.get("title", "").strip() for n in
+                  sorted(news, key=lambda x: x.get("providerPublishTime", 0), reverse=True)[:max_news]
+                  if n.get("title") and len(n.get("title", "")) > 5]
+        if not titles:
+            return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                    "num_articles": 0, "note": "No news available"}
+        results = nlp(titles, batch_size=min(8, len(titles)))
+        pos = sum(1 for r in results if r["label"] == "positive")
+        neu = sum(1 for r in results if r["label"] == "neutral")
+        total = len(results)
+        score = (pos * 100 + neu * 50) / total
+        overall = "Positive" if score >= 65 else ("Negative" if score <= 35 else "Neutral")
+        neg = total - pos - neu
+        return {"overall_sentiment": overall, "sentiment_score": round(score, 1),
+                "positive_pct": round(pos / total * 100, 1), "negative_pct": round(neg / total * 100, 1),
+                "num_articles": total, "device_used": "cuda" if device == 0 else "cpu",
+                "model": "ProsusAI/finbert"}
+    except ImportError:
+        return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                "num_articles": 0, "note": "transformers not installed"}
+    except Exception as e:
+        return {"overall_sentiment": "Neutral", "sentiment_score": 50.0,
+                "num_articles": 0, "error": str(e)[:100]}
