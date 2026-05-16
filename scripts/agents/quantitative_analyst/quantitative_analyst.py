@@ -26,6 +26,7 @@ def create_quantitative_analyst(llm=None):
                 get_monte_carlo_risk,
                 get_rolling_beta,
                 get_iv_rank_and_skew,
+                calculate_altman_beneish,
             )
             signals_available = True
         except Exception as e:
@@ -38,6 +39,7 @@ def create_quantitative_analyst(llm=None):
                 risk_data = get_monte_carlo_risk(ticker)
                 beta_data = get_rolling_beta(ticker)
                 iv_data = get_iv_rank_and_skew(ticker)
+                altman_data = calculate_altman_beneish(ticker)
 
                 # Build multi-horizon table
                 multi_horizon_text = ""
@@ -83,6 +85,7 @@ Quantitative models (LSTM + Chronos-2) show the current outlook with supporting 
 **Additional Quantitative Signals**
 - Beta (vs SPY): {beta_data.get('beta', 'N/A')} (Alpha: {beta_data.get('alpha', 'N/A')})
 - IV Rank: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')}
+- Altman Z-Score: {altman_data.get('z_score', 'N/A')} ({altman_data.get('risk_level', 'N/A')})
 
 **Conviction Level**: {conviction}
 

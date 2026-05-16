@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Added Beta + IV Rank & Skew  
+**Status**: Added Altman Z-Score + Beneish M-Score  
 **Last Updated**: 2026-05-16
 
 ---
@@ -62,9 +62,7 @@ From our `signals/` package:
 - `get_monte_carlo_risk()`
 - `get_rolling_beta()`
 - `get_iv_rank_and_skew()`
-- `get_lstm_forecast()`
-- `get_chronos_forecast()`
-- `get_finbert_sentiment()` (optional)
+- `calculate_altman_beneish()`
 
 ---
 
@@ -83,27 +81,21 @@ From our `signals/` package:
 
 ## 5. Open Questions / Todos
 
-- [ ] Finalize exact output schema (Markdown + structured section)
-- [ ] Decide on tool binding approach (LangChain tools vs direct function calls)
-- [ ] Determine how to register the new analyst in TradingAgents graph
-- [x] Create initial skeleton of `quantitative_analyst.py`
-- [x] Basic signals integration added
-- [x] Output polished
-- [x] Fixed field name mismatch
-- [x] Added Beta + IV Rank & Skew
-- [ ] Test with real tickers
+- [ ] Finalize exact output schema
+- [ ] Register agent in TradingAgents graph
+- [x] All core quantitative signals added (Multi-horizon, Monte Carlo, Beta, IV Rank, Altman Z)
+- [ ] Test expanded version
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                                      | Status      |
-|------------|-------------------------------------------------------------|-------------|
-| 2026-05-16 | Initial design created                                      | Done        |
-| 2026-05-16 | Skeleton + signals integration                              | Done        |
-| 2026-05-16 | Output polished + conviction level added                    | Done        |
-| 2026-05-16 | Fixed key mismatch + added Beta & IV Rank                   | Done        |
+| Date       | Update                                           | Status |
+|------------|--------------------------------------------------|--------|
+| 2026-05-16 | Initial design + skeleton                        | Done   |
+| 2026-05-16 | Signals integration (core + additional)          | Done   |
+| 2026-05-16 | Added Altman Z-Score + Beneish M-Score           | Done   |
 
 ---
 
-**Next Step**: Test the expanded version.
+**Next Step**: Test the full version.
