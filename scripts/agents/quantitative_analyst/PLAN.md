@@ -1,9 +1,12 @@
 # Quantitative Analyst Agent - Project Plan
 
 **Project Goal**  
-Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
+Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights. 
 
-**Status**: Phase 2 Implementation Plan Created  
+**v1 Role**: Data Provider (supplies quantitative reports and risk signals).  
+**v2+ Potential**: Light debate participation (optional).
+
+**Status**: Design Phase  
 **Last Updated**: 2026-05-16
 
 ---
@@ -25,7 +28,6 @@ scripts/
 │   └── quantitative_analyst/
 │       ├── __init__.py
 │       ├── quantitative_analyst.py          # Main agent creation logic
-│       ├── tools.py                         # Wrappers / tools for signals
 │       └── PLAN.md                          # This tracking document
 ├── signals/                                 # Existing (refactored)
 │   ├── technical.py
@@ -44,11 +46,13 @@ scripts/
 - **Role**: Advanced Quantitative & Model-Driven Specialist
 - **Creator Function**: `create_quantitative_analyst(llm)`
 
-### Core Responsibilities
+### Core Responsibilities (v1)
 - Generate multi-horizon forecasts (5d, 10d, 15d, 20d)
 - Provide risk metrics (Monte Carlo VaR / CVaR)
 - Deliver model consensus and uncertainty estimates
-- Participate in Researcher (Bull/Bear) debates with data-backed views
+- Act as a **Data Provider** — supply rich quantitative reports for Researchers and Trader
+
+**Note**: Debate participation is deferred to v2+. In v1 the agent focuses on delivering high-quality data rather than actively debating.
 
 ### Output Style (Hybrid)
 - Natural language executive summary
@@ -60,33 +64,41 @@ scripts/
 From our `signals/` package:
 - `get_multi_horizon_forecasts()`
 - `get_monte_carlo_risk()`
-- `get_rolling_beta()`
-- `get_iv_rank_and_skew()`
-- `calculate_altman_beneish()`
-- `get_earnings_surprise()`
+- `get_lstm_forecast()`
+- `get_chronos_forecast()`
+- `get_finbert_sentiment()` (optional)
 
 ---
 
 ## 4. Integration Strategy
 
-**Phase 1**: Design complete
-**Phase 2 (Current)**: Implementation planning
+**Phase 1 (Current)**: Develop inside `Stock_analysis` repo
+- Clean, maintainable code
+- Easy to test standalone
+
+**Phase 2 (Future)**: Integration options
+- Make the agent importable into TradingAgents
+- Potentially submit as a contribution / PR to TradingAgents
+- Or keep it as a powerful standalone module
 
 ---
 
 ## 5. Open Questions / Todos
 
-- [ ] Begin actual integration work
-- [ ] Decide whether to develop inside TradingAgents or create importable module
+- [ ] Finalize exact output schema (Markdown + structured section)
+- [ ] Decide on tool binding approach (LangChain tools vs direct function calls)
+- [ ] Determine how to register the new analyst in TradingAgents graph
+- [ ] Create initial implementation of `quantitative_analyst.py`
+- [ ] Test integration with existing signals package
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                      | Status |
-|------------|---------------------------------------------|--------|
-| 2026-05-16 | Created PHASE2_IMPLEMENTATION_PLAN.md       | Done   |
+| Date       | Update                                      | Status    |
+|------------|---------------------------------------------|-----------|
+| 2026-05-16 | Initial design created + PLAN.md initialized | In Progress |
 
 ---
 
-**Next Step**: Review implementation plan and decide on execution approach.
+**Next Step**: Start implementing the agent skeleton.

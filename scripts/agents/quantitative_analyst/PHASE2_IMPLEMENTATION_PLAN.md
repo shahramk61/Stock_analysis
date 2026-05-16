@@ -54,14 +54,14 @@ This is the cleanest and most consistent way with how TradingAgents currently wo
 - Add the Quantitative Analyst to run in parallel with other analysts.
 - Ensure its output (`quantitative_report`) is available to Researchers and the Trader.
 
-### Step 4: Start Simple (MVP)
+### Step 4: Start Simple (v1 MVP)
 
-**Initial version should:**
-- Run as a data provider.
-- Output the hybrid report we already have.
-- Not actively speak in the Researcher debate yet.
-
-This keeps the first integration low-risk and focused.
+**v1 Design Principles:**
+- The agent acts as a **Data Provider** (not an active debater).
+- It outputs the hybrid quantitative report.
+- It does **not** actively speak in the Researcher debate in v1.
+- Debate participation can be added in v2+ if desired.
+- Keep implementation simple and focused on delivering high-quality quantitative reports.
 
 ---
 

@@ -23,12 +23,13 @@
 | Aspect                    | Recommendation |
 |---------------------------|----------------|
 | **Primary Role**          | Quantitative Specialist / Data Provider |
-| **Secondary Role**        | Light participant in Researcher debate |
+| **v1 Role**               | Data Provider only (recommended) |
+| **v2+ Potential**         | Light debate participation (optional) |
 | **Main Strength**         | Delivers model-driven forecasts + risk + technical/quant signals |
 | **Interaction Style**     | Provides rich structured + interpreted data for Researchers and Trader to use |
 
-**Key Principle**:  
-The Quantitative Analyst should act more as a **specialist that supplies high-quality data** rather than a full debater (to avoid overlapping too much with Researchers).
+**Key Principle (v1)**:  
+The Quantitative Analyst acts as a **Data Provider**. It supplies high-quality quantitative reports rather than actively debating. Debate participation is deferred to v2+ if needed.
 
 ---
 
