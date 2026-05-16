@@ -41,34 +41,54 @@ def create_quantitative_analyst(llm=None):
                 for h in ["5d", "10d", "15d", "20d"]:
                     if h in horizons:
                         d = horizons[h]
-                        multi_horizon_text += f"| {h} | {d.get('predicted_return', 'N/A')} | {d.get('direction', 'N/A')} |\n"
+                        ret = d.get("predicted_return", "N/A")
+                        direction = d.get("direction", "N/A")
+                        multi_horizon_text += f"| {h} | {ret} | {direction} |\n"
+
+                if not multi_horizon_text:
+                    multi_horizon_text = "| — | — | — |\n"
+
+                # Simple conviction based on risk
+                var = risk_data.get("var_95", 0)
+                try:
+                    var_val = float(var)
+                    if var_val < 3:
+                        conviction = "High"
+                    elif var_val < 6:
+                        conviction = "Medium"
+                    else:
+                        conviction = "Low"
+                except:
+                    conviction = "Medium"
 
                 quantitative_report = f"""## Quantitative Analysis Report — {ticker}
 
 **Executive Summary**  
-Model-driven analysis using LSTM + Chronos-2 with Monte Carlo risk simulation.
+Quantitative models (LSTM + Chronos-2) show the current outlook with supporting risk metrics from Monte Carlo simulation.
 
 **Multi-Horizon Forecasts**
 | Horizon | Predicted Return | Direction |
 |---------|------------------|-----------|
-{multi_horizon_text if multi_horizon_text else "| — | — | — |"}
+{multi_horizon_text}
 
 **Risk Metrics (Monte Carlo)**
 - VaR (95%): {risk_data.get('var_95', 'N/A')}%
 - CVaR (95%): {risk_data.get('cvar_95', 'N/A')}%
 - Simulated Annual Volatility: {risk_data.get('simulated_annual_vol', 'N/A')}%
 
+**Conviction Level**: {conviction}
+
 **Model Consensus**  
 Ensemble view from multiple forecasting models.
 
 **Final View**  
-Quantitative models provide data-driven input for debate.
+Data-driven quantitative perspective ready for debate and decision making.
 """
             except Exception as e:
                 quantitative_report = f"""## Quantitative Analysis Report — {ticker}
 
 **Error computing signals**  
-{str(e)[:300]}
+{str(e)[:350]}
 """
         else:
             quantitative_report = f"""## Quantitative Analysis Report — {ticker}
