@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Bug Fixed (field name mismatch)  
+**Status**: Added Beta + IV Rank & Skew  
 **Last Updated**: 2026-05-16
 
 ---
@@ -60,6 +60,8 @@ scripts/
 From our `signals/` package:
 - `get_multi_horizon_forecasts()`
 - `get_monte_carlo_risk()`
+- `get_rolling_beta()`
+- `get_iv_rank_and_skew()`
 - `get_lstm_forecast()`
 - `get_chronos_forecast()`
 - `get_finbert_sentiment()` (optional)
@@ -87,7 +89,8 @@ From our `signals/` package:
 - [x] Create initial skeleton of `quantitative_analyst.py`
 - [x] Basic signals integration added
 - [x] Output polished
-- [x] Fixed field name mismatch (predicted_return_pct)
+- [x] Fixed field name mismatch
+- [x] Added Beta + IV Rank & Skew
 - [ ] Test with real tickers
 
 ---
@@ -99,8 +102,8 @@ From our `signals/` package:
 | 2026-05-16 | Initial design created                                      | Done        |
 | 2026-05-16 | Skeleton + signals integration                              | Done        |
 | 2026-05-16 | Output polished + conviction level added                    | Done        |
-| 2026-05-16 | Fixed key mismatch: now uses predicted_return_pct           | Done        |
+| 2026-05-16 | Fixed key mismatch + added Beta & IV Rank                   | Done        |
 
 ---
 
-**Next Step**: Test again to confirm the fix works.
+**Next Step**: Test the expanded version.

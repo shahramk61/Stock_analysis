@@ -24,6 +24,8 @@ def create_quantitative_analyst(llm=None):
             from signals import (
                 get_multi_horizon_forecasts,
                 get_monte_carlo_risk,
+                get_rolling_beta,
+                get_iv_rank_and_skew,
             )
             signals_available = True
         except Exception as e:
@@ -34,6 +36,8 @@ def create_quantitative_analyst(llm=None):
             try:
                 horizon_data = get_multi_horizon_forecasts(ticker)
                 risk_data = get_monte_carlo_risk(ticker)
+                beta_data = get_rolling_beta(ticker)
+                iv_data = get_iv_rank_and_skew(ticker)
 
                 # Build multi-horizon table
                 multi_horizon_text = ""
@@ -75,6 +79,10 @@ Quantitative models (LSTM + Chronos-2) show the current outlook with supporting 
 - VaR (95%): {risk_data.get('var_95', 'N/A')}%
 - CVaR (95%): {risk_data.get('cvar_95', 'N/A')}%
 - Simulated Annual Volatility: {risk_data.get('simulated_annual_vol', 'N/A')}%
+
+**Additional Quantitative Signals**
+- Beta (vs SPY): {beta_data.get('beta', 'N/A')} (Alpha: {beta_data.get('alpha', 'N/A')})
+- IV Rank: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')}
 
 **Conviction Level**: {conviction}
 
