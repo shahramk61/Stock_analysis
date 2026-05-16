@@ -56,16 +56,30 @@ def create_quantitative_analyst(llm=None):
                 if not multi_horizon_text:
                     multi_horizon_text = "| — | — | — |\n"
 
-                # Simple conviction based on risk
+                # Improved multi-factor conviction logic
                 var = risk_data.get("var_95", 0)
+                z_score = altman_data.get("z_score", 3.0)
                 try:
                     var_val = float(var)
-                    if var_val < 3:
-                        conviction = "High"
-                    elif var_val < 6:
+                    z_val = float(z_score)
+
+                    risk_score = 0
+                    if var_val > 8:
+                        risk_score += 2
+                    elif var_val > 5:
+                        risk_score += 1
+
+                    if z_val < 1.8:
+                        risk_score += 2
+                    elif z_val < 3.0:
+                        risk_score += 1
+
+                    if risk_score >= 3:
+                        conviction = "Low"
+                    elif risk_score == 2:
                         conviction = "Medium"
                     else:
-                        conviction = "Low"
+                        conviction = "High"
                 except:
                     conviction = "Medium"
 
@@ -85,12 +99,16 @@ Quantitative models (LSTM + Chronos-2) show the current outlook with supporting 
 - Simulated Annual Volatility: {risk_data.get('simulated_annual_vol', 'N/A')}%
 
 **Additional Quantitative Signals**
-- Beta (vs SPY): {beta_data.get('beta', 'N/A')} (Alpha: {beta_data.get('alpha', 'N/A')})
-- IV Rank: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')}
-- Altman Z-Score: {altman_data.get('z_score', 'N/A')} ({altman_data.get('risk_level', 'N/A')})
-- Earnings Surprise (avg): {earnings_data.get('avg_surprise_pct', 'N/A')}%
+- **Beta (vs SPY)**: {beta_data.get('beta', 'N/A')} (Alpha: {beta_data.get('alpha', 'N/A')}) — Measures market sensitivity.
+- **IV Rank**: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')} — Options market implied uncertainty and hedging bias.
+- **Altman Z-Score**: {altman_data.get('z_score', 'N/A')} ({altman_data.get('risk_level', 'N/A')}) — Credit risk / financial distress indicator.
+- **Earnings Surprise (avg)**: {earnings_data.get('avg_surprise_pct', 'N/A')}% — Historical tendency to beat/miss estimates.
 
 **Conviction Level**: {conviction}
+
+**Key Takeaways**
+- Conviction is {conviction.lower()} primarily due to risk metrics and financial health signals.
+- The stock shows a mix of quantitative strengths and risks that should be weighed in the debate.
 
 **Model Consensus**  
 Ensemble view combining multiple forecasting models with uncertainty awareness.

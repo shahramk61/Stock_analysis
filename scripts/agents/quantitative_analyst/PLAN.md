@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: All non-forecasting signals added  
+**Status**: Refined & Polished  
 **Last Updated**: 2026-05-16
 
 ---
@@ -85,7 +85,7 @@ From our `signals/` package:
 - [ ] Finalize exact output schema
 - [ ] Register agent in TradingAgents graph
 - [x] All non-forecasting quantitative signals added
-- [ ] Test full version
+- [x] Output refined with better interpretations + improved conviction logic
 
 ---
 
@@ -93,8 +93,8 @@ From our `signals/` package:
 
 | Date       | Update                                           | Status |
 |------------|--------------------------------------------------|--------|
-| 2026-05-16 | All non-forecasting signals integrated           | Done   |
+| 2026-05-16 | Refined output: better interpretations + Key Takeaways + multi-factor conviction | Done   |
 
 ---
 
-**Next Step**: Test the complete Quantitative Analyst.
+**Next Step**: Test the polished version.
