@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Skeleton Created  
+**Status**: Signals Integration Added  
 **Last Updated**: 2026-05-16
 
 ---
@@ -85,18 +85,20 @@ From our `signals/` package:
 - [ ] Decide on tool binding approach (LangChain tools vs direct function calls)
 - [ ] Determine how to register the new analyst in TradingAgents graph
 - [x] Create initial skeleton of `quantitative_analyst.py`
-- [ ] Implement actual calls to signals package
-- [ ] Test integration with existing signals package
+- [x] Basic signals integration added
+- [ ] Improve error handling and output formatting
+- [ ] Test with real tickers
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                           | Status      |
-|------------|--------------------------------------------------|-------------|
-| 2026-05-16 | Initial design created + PLAN.md initialized     | Done        |
-| 2026-05-16 | Created minimal skeleton for quantitative_analyst.py | In Progress |
+| Date       | Update                                              | Status      |
+|------------|-----------------------------------------------------|-------------|
+| 2026-05-16 | Initial design created + PLAN.md initialized        | Done        |
+| 2026-05-16 | Created minimal skeleton for quantitative_analyst.py| Done        |
+| 2026-05-16 | Added signals integration (multi-horizon + risk)    | In Progress |
 
 ---
 
-**Next Step**: Flesh out the agent with actual signals integration.
+**Next Step**: Polish output format and test the agent.
