@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Output Polished  
+**Status**: Bug Fixed (field name mismatch)  
 **Last Updated**: 2026-05-16
 
 ---
@@ -86,21 +86,21 @@ From our `signals/` package:
 - [ ] Determine how to register the new analyst in TradingAgents graph
 - [x] Create initial skeleton of `quantitative_analyst.py`
 - [x] Basic signals integration added
-- [x] Output polished with better formatting and conviction level
-- [ ] Test with real tickers (AAPL, NVDA, etc.)
-- [ ] Consider adding more signals (LSTM/Chronos breakdown)
+- [x] Output polished
+- [x] Fixed field name mismatch (predicted_return_pct)
+- [ ] Test with real tickers
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                                   | Status      |
-|------------|----------------------------------------------------------|-------------|
-| 2026-05-16 | Initial design created + PLAN.md initialized             | Done        |
-| 2026-05-16 | Created minimal skeleton for quantitative_analyst.py     | Done        |
-| 2026-05-16 | Added signals integration (multi-horizon + risk)         | Done        |
-| 2026-05-16 | Polished output formatting + added conviction level      | In Progress |
+| Date       | Update                                                      | Status      |
+|------------|-------------------------------------------------------------|-------------|
+| 2026-05-16 | Initial design created                                      | Done        |
+| 2026-05-16 | Skeleton + signals integration                              | Done        |
+| 2026-05-16 | Output polished + conviction level added                    | Done        |
+| 2026-05-16 | Fixed key mismatch: now uses predicted_return_pct           | Done        |
 
 ---
 
-**Next Step**: Test the agent with real data and refine further.
+**Next Step**: Test again to confirm the fix works.

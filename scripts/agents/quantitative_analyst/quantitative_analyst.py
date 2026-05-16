@@ -41,7 +41,7 @@ def create_quantitative_analyst(llm=None):
                 for h in ["5d", "10d", "15d", "20d"]:
                     if h in horizons:
                         d = horizons[h]
-                        ret = d.get("predicted_return", "N/A")
+                        ret = d.get("predicted_return_pct", d.get("predicted_return", "N/A"))
                         direction = d.get("direction", "N/A")
                         multi_horizon_text += f"| {h} | {ret} | {direction} |\n"
 
@@ -79,7 +79,7 @@ Quantitative models (LSTM + Chronos-2) show the current outlook with supporting 
 **Conviction Level**: {conviction}
 
 **Model Consensus**  
-Ensemble view from multiple forecasting models.
+Ensemble view combining multiple forecasting models with uncertainty awareness.
 
 **Final View**  
 Data-driven quantitative perspective ready for debate and decision making.
@@ -87,7 +87,7 @@ Data-driven quantitative perspective ready for debate and decision making.
             except Exception as e:
                 quantitative_report = f"""## Quantitative Analysis Report — {ticker}
 
-**Error computing signals**  
+**Error computing quantitative signals**  
 {str(e)[:350]}
 """
         else:
