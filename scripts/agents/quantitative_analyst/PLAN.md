@@ -3,7 +3,7 @@
 **Project Goal**  
 Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights that can participate in multi-agent debates.
 
-**Status**: Refined & Polished  
+**Status**: Integration Design Phase Started  
 **Last Updated**: 2026-05-16
 
 ---
@@ -69,32 +69,29 @@ From our `signals/` package:
 
 ## 4. Integration Strategy
 
-**Phase 1 (Current)**: Develop inside `Stock_analysis` repo
+**Phase 1 (Current)**: Develop inside `Stock_analysis` repo + create integration design
 - Clean, maintainable code
 - Easy to test standalone
 
-**Phase 2 (Future)**: Integration options
-- Make the agent importable into TradingAgents
-- Potentially submit as a contribution / PR to TradingAgents
-- Or keep it as a powerful standalone module
+**Phase 2 (Future)**: Port to TradingAgents as a selectable analyst
 
 ---
 
 ## 5. Open Questions / Todos
 
-- [ ] Finalize exact output schema
-- [ ] Register agent in TradingAgents graph
-- [x] All non-forecasting quantitative signals added
-- [x] Output refined with better interpretations + improved conviction logic
+- [ ] Finalize Integration Design
+- [ ] Create integration code / instructions
+- [x] All core signals added
+- [x] Output refined
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                           | Status |
-|------------|--------------------------------------------------|--------|
-| 2026-05-16 | Refined output: better interpretations + Key Takeaways + multi-factor conviction | Done   |
+| Date       | Update                                      | Status |
+|------------|---------------------------------------------|--------|
+| 2026-05-16 | Created INTEGRATION_DESIGN.md               | Done   |
 
 ---
 
-**Next Step**: Test the polished version.
+**Next Step**: Review integration design and move to implementation planning.
