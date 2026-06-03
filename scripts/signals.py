@@ -1,8 +1,34 @@
-from signals import *
+"""Public signals API — canonical implementation in stock_signals.py."""
+from stock_signals import *  # noqa: F401, F403
 
 __all__ = [
-    "get_iv_rank_and_skew", "calculate_altman_beneish", "get_earnings_surprise", "get_rolling_beta", "get_monte_carlo_risk",
-    "get_lstm_forecast", "get_chronos_forecast",
-    "get_nhits_forecast", "get_tft_forecast", "get_patchtst_forecast", "get_nbeats_forecast", "get_tcn_forecast", "get_nhits_tft_patchtst_ensemble",
+    "get_iv_rank_and_skew",
+    "calculate_altman_beneish",
+    "get_earnings_surprise",
+    "get_rolling_beta",
+    "calculate_piotroski_f_score",
+    "get_atr_volatility_clustering",
+    "get_relative_strength",
+    "get_momentum_and_52w_high",
+    "get_quality_accruals_gross_profit",
+    "get_market_regime",
+    "get_garch_forecast",
+    "get_amihud_illiquidity",
+    "get_share_turnover",
+    "get_volume_price_correlation",
+    "get_simple_formulaic_alpha",
+    "get_obv",
+    "get_chaikin_money_flow",
+    "get_monte_carlo_risk",
+    "get_finbert_sentiment",
+    "get_lstm_forecast",
+    "get_chronos_forecast",
+    "get_nhits_forecast",
+    "get_tft_forecast",
+    "get_patchtst_forecast",
+    "get_nbeats_forecast",
+    "get_tcn_forecast",
+    "get_nhits_tft_patchtst_ensemble",
+    "get_multi_horizon_forecasts",
     "_gpu_device",
 ]

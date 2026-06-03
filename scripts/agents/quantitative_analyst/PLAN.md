@@ -1,104 +1,89 @@
 # Quantitative Analyst Agent - Project Plan
 
 **Project Goal**  
-Create a new specialized **Quantitative Analyst** agent for the TradingAgents framework (and potentially standalone use). This agent will leverage our advanced local forecasting and risk models to provide high-quality, model-driven insights. 
+Create a specialized **Quantitative Analyst** agent for the TradingAgents framework (and standalone use). It leverages local forecasting and risk models for model-driven insights.
 
-**v1 Role**: Data Provider (supplies quantitative reports and risk signals).  
+**v1 Role**: Data Provider (quantitative reports and risk signals).  
 **v2+ Potential**: Light debate participation (optional).
 
-**Status**: Design Phase  
-**Last Updated**: 2026-05-16
+**Status**: Phase 1 complete — standalone agent implemented; signals pipeline unified under `scripts/`.  
+**Last Updated**: 2026-06-03
 
 ---
 
-## 1. High-Level Approach
+## 1. Canonical Pipeline Layout
 
-- Develop the new agent **inside the existing `Stock_analysis` repository**.
-- Keep it well-organized and importable so it can later be integrated into TradingAgents or contributed back.
-- Use our already refactored `signals/` package as the core quantitative engine.
-- Output style: **Hybrid** (Natural language summary + structured data/tables).
-
----
-
-## 2. Recommended Project Structure
+All analysis code lives under `scripts/` (single source of truth):
 
 ```
 scripts/
-├── agents/
-│   └── quantitative_analyst/
-│       ├── __init__.py
-│       ├── quantitative_analyst.py          # Main agent creation logic
-│       └── PLAN.md                          # This tracking document
-├── signals/                                 # Existing (refactored)
-│   ├── technical.py
-│   ├── ml_forecast.py
-│   ├── neural_forecast.py
-│   └── utils.py
-└── signals.py
+├── stock_signals.py      # Full signals implementation (7-model ensemble, etc.)
+├── signals.py            # Public re-export API
+├── score.py, report.py, fetch_data.py, montecarlo.py, dcf.py, gpu_utils.py
+├── analyze.py, dashboard.py
+├── _pipeline.py          # Shared sys.path setup
+└── agents/
+    └── quantitative_analyst/
+        ├── quantitative_analyst.py
+        ├── PLAN.md
+        ├── INTEGRATION_DESIGN.md
+        └── PHASE2_IMPLEMENTATION_PLAN.md
 ```
 
----
-
-## 3. Agent Design
-
-### Agent Identity
-- **Name**: `QuantitativeAnalyst`
-- **Role**: Advanced Quantitative & Model-Driven Specialist
-- **Creator Function**: `create_quantitative_analyst(llm)`
-
-### Core Responsibilities (v1)
-- Generate multi-horizon forecasts (5d, 10d, 15d, 20d)
-- Provide risk metrics (Monte Carlo VaR / CVaR)
-- Deliver model consensus and uncertainty estimates
-- Act as a **Data Provider** — supply rich quantitative reports for Researchers and Trader
-
-**Note**: Debate participation is deferred to v2+. In v1 the agent focuses on delivering high-quality data rather than actively debating.
-
-### Output Style (Hybrid)
-- Natural language executive summary
-- Clear tables for forecasts and risk metrics
-- Structured model breakdown
-- Final view with conviction level
-
-### Key Functions to Use
-From our `signals/` package:
-- `get_multi_horizon_forecasts()`
-- `get_monte_carlo_risk()`
-- `get_lstm_forecast()`
-- `get_chronos_forecast()`
-- `get_finbert_sentiment()` (optional)
+`.claude/skills/stock-analysis/scripts/` contains thin shims that re-export from `scripts/` via `_canonical.py`.
 
 ---
 
-## 4. Integration Strategy
+## 2. Agent Design
 
-**Phase 1 (Current)**: Develop inside `Stock_analysis` repo
-- Clean, maintainable code
-- Easy to test standalone
+| Item | Detail |
+|------|--------|
+| **Name** | `QuantitativeAnalyst` |
+| **Creator** | `create_quantitative_analyst(llm=None)` |
+| **Output key** | `quantitative_report` |
+| **Signals used** | Multi-horizon forecasts, Monte Carlo VaR/CVaR, beta, IV rank/skew, Altman Z, earnings surprise |
 
-**Phase 2 (Future)**: Integration options
-- Make the agent importable into TradingAgents
-- Potentially submit as a contribution / PR to TradingAgents
-- Or keep it as a powerful standalone module
+**v1**: Data provider only — no active debate participation.
 
 ---
 
-## 5. Open Questions / Todos
+## 3. Phase Status
 
-- [ ] Finalize exact output schema (Markdown + structured section)
-- [ ] Decide on tool binding approach (LangChain tools vs direct function calls)
-- [ ] Determine how to register the new analyst in TradingAgents graph
-- [ ] Create initial implementation of `quantitative_analyst.py`
-- [ ] Test integration with existing signals package
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **Phase 1** | Agent in `Stock_analysis`, wired to canonical `signals` | Done |
+| **Phase 2** | Port to TradingAgents graph (`selected_analysts` includes `quantitative`) | Planned |
+
+See `INTEGRATION_DESIGN.md` and `PHASE2_IMPLEMENTATION_PLAN.md` for Phase 2 steps.
+
+---
+
+## 4. Completed Todos
+
+- [x] Output schema (Markdown + tables + conviction + key takeaways)
+- [x] Direct function calls (no LangChain tools in v1)
+- [x] `quantitative_analyst.py` implementation
+- [x] Test harness: `test_quant_analyst.py`
+- [x] Unify signals pipeline (`stock_signals.py` canonical)
+
+---
+
+## 5. Open Todos (Phase 2)
+
+- [ ] Port agent to `tradingagents/agents/analysts/quantitative_analyst.py`
+- [ ] Register in GraphSetup / `selected_analysts`
+- [ ] End-to-end test inside TradingAgents
 
 ---
 
 ## 6. Progress Log
 
-| Date       | Update                                      | Status    |
-|------------|---------------------------------------------|-----------|
-| 2026-05-16 | Initial design created + PLAN.md initialized | In Progress |
+| Date | Update | Status |
+|------|--------|--------|
+| 2026-05-16 | Design docs + agent skeleton | In progress |
+| 2026-05-16 | Full signal integration + polish | Done |
+| 2026-06-03 | Unified canonical `scripts/` pipeline; updated PLAN | Done |
 
 ---
 
-**Next Step**: Start implementing the agent skeleton.
+**Next step**: Phase 2 — integrate into TradingAgents per `PHASE2_IMPLEMENTATION_PLAN.md`.

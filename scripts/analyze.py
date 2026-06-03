@@ -3,12 +3,10 @@
 Root scripts/analyze.py — uses scripts/score.py + scripts/report.py
 with shared modules (fetch_data, montecarlo, dcf) from the skills pipeline.
 """
-import sys, os, argparse, json
+import argparse
+import json
 
-# Skills pipeline provides fetch_data, montecarlo, dcf
-SKILLS_DIR = os.path.join(os.path.dirname(__file__), '..', '.claude', 'skills', 'stock-analysis', 'scripts')
-sys.path.insert(0, SKILLS_DIR)
-sys.path.insert(0, os.path.dirname(__file__))  # root scripts/ first (score, report, signals)
+import _pipeline  # noqa: F401 — ensures scripts/ is on sys.path
 
 from fetch_data import fetch_stock_data
 from score import calculate_pillars

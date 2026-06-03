@@ -1,11 +1,13 @@
 # Stock Analysis v5.0 - Signal Generator for Trading Bot
 
-This skill now produces structured JSON output that can be consumed by a trading bot.
+Canonical pipeline code lives in `scripts/` (signals, scoring, reports, dashboard). The Claude skill under `.claude/skills/stock-analysis/` re-exports from there.
 
 ## Usage
 ```bash
-python scripts/analyze.py AAPL --output json --profile balanced
+python scripts/analyze.py AAPL --output json --profile Balanced
+streamlit run scripts/dashboard.py
+python test_quant_analyst.py
 ```
 
 ## Future
-The output JSON will be used by a separate trading bot to execute orders via Trading API.
+Structured JSON output is intended for a separate trading bot via Trading API.

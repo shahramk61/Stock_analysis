@@ -5,7 +5,13 @@ This agent provides advanced quantitative signals using our local models
 (LSTM, Chronos-2, Monte Carlo risk, multi-horizon forecasts, etc.).
 """
 
+import os
+import sys
 from typing import Dict, Any
+
+_SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
 
 
 def create_quantitative_analyst(llm=None):
@@ -50,6 +56,8 @@ def create_quantitative_analyst(llm=None):
                     if h in horizons:
                         d = horizons[h]
                         ret = d.get("predicted_return_pct", d.get("predicted_return", "N/A"))
+                        if isinstance(ret, (int, float)):
+                            ret = f"{ret:+.2f}%"
                         direction = d.get("direction", "N/A")
                         multi_horizon_text += f"| {h} | {ret} | {direction} |\n"
 

@@ -3,8 +3,7 @@ Stock Analysis Dashboard — v4.13
 Streamlit UI for the full signal pipeline (CPU + GPU signals).
 Run: streamlit run scripts/dashboard.py
 """
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '.claude', 'skills', 'stock-analysis', 'scripts'))
+import _pipeline  # noqa: F401 — ensures scripts/ is on sys.path
 
 import streamlit as st
 import plotly.graph_objects as go
