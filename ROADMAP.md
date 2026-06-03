@@ -57,10 +57,11 @@
 - [x] Merged to `main`
 
 ## Milestone 7 — TradingAgents Integration (Phase 2)
-- [ ] Port `quantitative_analyst.py` to TradingAgents
-- [ ] Add `quantitative` to `selected_analysts`
-- [ ] Wire into GraphSetup; expose `quantitative_report` to Researchers / Trader
-- [ ] End-to-end integration test
+- [x] Port `quantitative_analyst.py` to TradingAgents (`~/TradingAgents`)
+- [x] Add `quantitative` to `selected_analysts` + CLI
+- [x] Wire into GraphSetup; expose `quantitative_report` to Researchers / Risk team
+- [x] Unit tests (`tests/test_quantitative_analyst.py`)
+- [ ] Full end-to-end run with live LLM API keys + GPU signals
 
 ## Milestone 8 — Future Ideas
 
