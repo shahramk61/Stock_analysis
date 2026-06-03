@@ -1,42 +1,61 @@
-# Stock Analysis — Claude Code Skill
+# Stock Analysis — Claude Code Skill & Python Pipeline (v5.0)
 
-A Claude Code skill for comprehensive, data-driven stock analysis. Uses a configurable weighted scoring model across four pillars — fundamentals, technicals, valuation, and sentiment — with integrated risk management, sector/peer comparison, and multi-horizon recommendations.
+Comprehensive, data-driven stock analysis with a configurable weighted scoring model, GPU-accelerated ML signals, and structured JSON output for trading-bot integration.
+
+**Canonical code** lives in `scripts/` (signals, scoring, reports, dashboard). The Claude skill under `.claude/skills/stock-analysis/` re-exports from there.
 
 ---
 
 ## Features
 
-- **Configurable investor profiles** — Balanced, Value, Growth, Momentum, Income (adjusts pillar weights automatically)
-- **4-pillar weighted scoring** — 0–100 composite score with emoji ratings
-- **Risk management** — position sizing, ATR-based stop-losses, R/R ratio check, auto-flagging of 8 risk conditions
-- **Sector & peer comparison** — benchmarks the stock against 3–5 peers and sector averages
-- **Multi-horizon recommendations** — separate Buy/Hold/Avoid for Swing, Intermediate, and Long-term
-- **Catalyst calendar** — earnings date, ex-dividend, upcoming events
-- **Multi-stock comparison** — score and rank multiple tickers in one command
-- **Watchlist ranking** — fast-score a list of tickers and get a ranked table
-- **Data integrity guardrails** — never invents numbers; flags missing data explicitly
+- **Configurable investor profiles** — Balanced, Value, Growth, Momentum (adjusts pillar weights automatically)
+- **6-pillar weighted scoring** — Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 composite)
+- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, LSTM, Chronos-2, 7-model ensemble, FinBERT, etc.
+- **Risk management** — position sizing, ATR-based stop-losses, R/R ratio, auto-flagging
+- **Multi-horizon forecasts** — 5d / 10d / 15d / 20d / 50d with median and weighted ensembles
+- **Streamlit dashboard** — interactive exploration with Plotly charts
+- **JSON signal export** — `signals_TICKER.json` for trading-bot consumption
+- **Claude Code commands** — `/analyze-stock`, `/watchlist`
 
 ---
 
 ## Installation
 
-This skill works inside any Claude Code project. Copy the `.claude/` folder into your project root:
-
 ```bash
 git clone https://github.com/shahramk61/Stock_analysis.git
-cp -r Stock_analysis/.claude /your/project/root/
+cd Stock_analysis
+python -m pip install -r requirements.txt
 ```
 
-Or use it standalone by opening this repo directly in Claude Code:
+For Claude Code only, copy `.claude/` into your project root, or open this repo directly:
 
 ```bash
-cd Stock_analysis
 claude
 ```
 
 ---
 
-## Usage
+## Python Pipeline Usage
+
+```bash
+# Full analysis (report + JSON)
+python scripts/analyze.py AAPL --output both --profile Balanced
+
+# JSON only (trading bot)
+python scripts/analyze.py AAPL --output json --profile Growth
+
+# Interactive dashboard
+streamlit run scripts/dashboard.py
+
+# Quantitative Analyst smoke test
+python test_quant_analyst.py
+```
+
+Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).
+
+---
+
+## Claude Code Usage
 
 ### Analyze a single stock
 
@@ -44,15 +63,11 @@ claude
 /analyze-stock AAPL
 ```
 
-Claude will ask your investor profile, then deliver a full report with pillar scores, risk management, peer comparison, and catalyst calendar.
-
 ### Compare multiple stocks
 
 ```
 /analyze-stock AAPL MSFT NVDA
 ```
-
-Scores all three, builds a ranking table, and identifies the top pick with a comparison summary.
 
 ### Rank a watchlist
 
@@ -60,102 +75,52 @@ Scores all three, builds a ranking table, and identifies the top pick with a com
 /watchlist AAPL MSFT NVDA GOOGL META AMZN
 ```
 
-Fast-scores the entire list and returns a ranked table with composite scores, ratings, one-line theses, and risk flags.
-
 ---
 
 ## Scoring Model
 
-Each stock is scored 0–100 across four pillars, then combined using profile weights:
-
-| Pillar | Balanced | Value | Growth | Momentum | Income |
-|---|---|---|---|---|---|
-| Fundamentals | 35% | 40% | 40% | 20% | 35% |
-| Technicals | 25% | 15% | 20% | 40% | 20% |
-| Valuation | 25% | 35% | 20% | 20% | 30% |
-| Sentiment | 15% | 10% | 20% | 20% | 15% |
-
-### Score → Rating
+| Pillar | Balanced | Value | Growth | Momentum |
+|---|---|---|---|---|
+| Fundamentals | 25% | 20% | 30% | 15% |
+| Technicals | 20% | 15% | 25% | 30% |
+| Valuation | 20% | 30% | 15% | 15% |
+| Sentiment | 10% | 10% | 10% | 15% |
+| ESG | 10% | 10% | 5% | 10% |
+| Risk | 15% | 15% | 15% | 15% |
 
 | Score | Rating |
 |---|---|
-| 80–100 | 🟢🟢 Strong Buy |
-| 65–79 | 🟢 Buy |
-| 50–64 | 🟡 Hold/Watch |
-| 35–49 | 🔴 Caution |
-| 0–34 | 🔴🔴 Avoid |
-
----
-
-## Example Output (abbreviated)
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 STOCK ANALYSIS: AAPL — Apple Inc.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 Date: 2026-05-10  |  💲 Price: $213.49  |  🏭 Sector: Technology
-🎯 Investor Profile: Growth
-
-## Executive Summary
-Apple continues to dominate consumer hardware and services, with Services
-revenue growing 14% YoY and expanding margins offsetting iPhone plateau risk.
-The stock trades at a premium but justified by its capital return program and
-AI integration runway; the key risk is China revenue exposure (~17% of sales).
-
-Composite Score: 74/100 🟢 → Buy
-
-| Pillar | Weight | Score | Drivers |
-|---|---|---|---|
-| 📈 Fundamentals | 40% | 78 | EPS +9% YoY; FCF yield 3.8%; D/E 1.8 (flagged) |
-| 📉 Technicals   | 20% | 68 | RSI=54; above 50MA, below 200MA; RS neutral |
-| 💰 Valuation    | 20% | 65 | PEG=2.8; Fwd P/E=28; DCF upside ~12% |
-| 🗣 Sentiment    | 20% | 82 | 31 Buy / 8 Hold / 1 Sell; short int=0.7% |
-
-🚩 Risk Flags
-- ⚠️ Debt/Equity = 1.8 (approaching 2.0 threshold)
-- ⚠️ China revenue concentration risk
-
-Multi-Horizon:
-| Horizon | Rating | Rationale |
-|---|---|---|
-| 🏃 Swing (1–3 mo) | Hold | Near-term resistance at $220; wait for pullback |
-| 📈 Intermediate   | Buy  | Services margin expansion drives EPS beat likely |
-| 🏦 Long-term      | Buy  | AI ecosystem lock-in and capital return support thesis |
-```
-
----
-
-## Risk Management
-
-Every analysis includes:
-
-- **Position sizing** based on composite score + beta
-- **Stop-loss** at 1.5–2× ATR below entry
-- **Price target** from DCF or technical resistance
-- **R/R ratio** (only recommends entry at ≥ 2:1)
-- **8 auto-flagged risk conditions**: high debt, negative FCF, RSI extremes, consecutive earnings misses, insider selling, high beta, high short interest, negative news sentiment
+| 75–100 | Strong Buy |
+| 60–74 | Buy |
+| 50–59 | Hold/Watch |
+| 35–49 | Caution |
+| 0–34 | Avoid |
 
 ---
 
 ## Project Structure
 
 ```
+scripts/
+├── stock_signals.py      # Canonical signals (7-model ensemble, etc.)
+├── analyze.py, score.py, report.py, dashboard.py
+└── agents/quantitative_analyst/
+
 .claude/
-├── skills/
-│   └── stock-analysis/
-│       └── SKILL.md          # Full skill definition
-└── commands/
-    ├── analyze-stock.md      # /analyze-stock TICKER [...]
-    └── watchlist.md          # /watchlist TICKER1 TICKER2 ...
-README.md
+├── skills/stock-analysis/   # Skill definition + shims → scripts/
+└── commands/                # /analyze-stock, /watchlist
+
+SKILL.md, ROADMAP.md, requirements.txt
 ```
 
 ---
 
 ## Roadmap
 
-- [ ] Monte Carlo simulation for price target ranges
-- [ ] ESG/Quality pillar (optional 5–10% weight)
-- [ ] Alert logic: re-analyze when price hits target or earnings approach
-- [ ] Export analysis to PDF or markdown file
-- [ ] Claude Project integration with uploaded 10-Ks and earnings transcripts
+See [ROADMAP.md](ROADMAP.md) for milestone status. Phase 2: integrate Quantitative Analyst into TradingAgents.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

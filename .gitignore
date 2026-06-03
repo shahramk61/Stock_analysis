@@ -1,0 +1,17 @@
+# Generated analysis reports
+*_analysis_*.md
+*_analysis.md
+*_analysis_*.html
+*_analysis_*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# PyTorch Lightning training logs
+lightning_logs/
+
+# Generated signal JSON files
+signals_*.json
+

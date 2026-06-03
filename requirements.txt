@@ -1,0 +1,14 @@
+yfinance>=0.2.40
+pandas>=2.2
+numpy>=1.26
+statsmodels>=0.14
+tabulate>=0.9
+torch>=2.4  # Install with CUDA support for RTX 5080: pip install torch --index-url https://download.pytorch.org/whl/cu128 (or latest cuXXX for Blackwell)
+chronos-forecasting>=2.0  # Zero-shot time series foundation model (Amazon Chronos); GPU recommended
+transformers>=4.30.0  # For FinBERT financial sentiment analysis (GPU accelerated)
+neuralforecast>=1.7.0  # SOTA neural time series models (N-BEATS, NHITS, PatchTST, etc.); GPU via torch
+arch>=7.0.0  # GARCH volatility forecasting
+hmmlearn>=0.3.0  # Hidden Markov Model for regime detection
+streamlit>=1.28.0  # Interactive dashboard
+plotly>=5.18.0  # Interactive charts for dashboard
+chronos-forecasting>=1.0
