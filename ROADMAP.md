@@ -49,13 +49,26 @@
 
 ---
 
-## Milestone 6 — Future Ideas
+## Milestone 6 — v5.0 Pipeline & Quant Analyst ✅
+- [x] Unified canonical code under `scripts/` (`stock_signals.py`, score, report, dashboard)
+- [x] Skill shims re-export from `scripts/` via `_canonical.py`
+- [x] Structured JSON output for trading-bot integration
+- [x] Quantitative Analyst agent (Phase 1 — standalone data provider)
+- [x] Merged to `main`
+
+## Milestone 7 — TradingAgents Integration (Phase 2)
+- [ ] Port `quantitative_analyst.py` to TradingAgents
+- [ ] Add `quantitative` to `selected_analysts`
+- [ ] Wire into GraphSetup; expose `quantitative_report` to Researchers / Trader
+- [ ] End-to-end integration test
+
+## Milestone 8 — Future Ideas
 
 | Idea | Effort | Notes |
 |---|---|---|
-| Python-based full Monte Carlo (10k paths via Bash) | Medium | More accurate than log-normal approximation; needs Bash + numpy |
 | Claude Project integration (upload 10-Ks) | Medium | Upload earnings transcripts as knowledge base for deeper analysis |
 | Automated watchlist re-scoring on schedule | High | Requires persistent storage or cron-style trigger |
 | PDF generation via Pandoc | Low | `pandoc report.md -o report.pdf` if Pandoc installed |
 | Options chain analysis | High | IV, put/call ratio, max pain — new pillar or separate skill |
 | Dividend growth analysis | Medium | Separate scoring track for income investors |
+| Quant Analyst v2 debate participation | Medium | Optional speaking role in researcher debate |

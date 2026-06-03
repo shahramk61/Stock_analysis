@@ -15,3 +15,10 @@ lightning_logs/
 # Generated signal JSON files
 signals_*.json
 
+# Connector / push test artifacts
+test_push.txt
+test_connector_push.txt
+
+# Ad-hoc snapshots (keep canonical reports via analyze.py)
+*_snapshot_*.md
+

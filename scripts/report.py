@@ -1,6 +1,9 @@
 from tabulate import tabulate
 import json
+import os
 from datetime import datetime
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 def generate_report(data, scores, mc_result, profile):
     ticker = data['ticker']
@@ -189,7 +192,7 @@ def generate_json_report(data, scores, mc_result, profile):
         "monte_carlo": mc_result
     }
     
-    filename = f"signals_{data['ticker']}.json"
-    with open(filename, 'w') as f:
+    filename = os.path.join(_REPO_ROOT, f"signals_{data['ticker']}.json")
+    with open(filename, "w") as f:
         json.dump(output, f, indent=2)
     return filename
