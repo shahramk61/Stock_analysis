@@ -6,8 +6,8 @@ Create a specialized **Quantitative Analyst** agent for the TradingAgents framew
 **v1 Role**: Data Provider (quantitative reports and risk signals).  
 **v2+ Potential**: Light debate participation (optional).
 
-**Status**: Phase 1 complete — standalone agent implemented; signals pipeline unified under `scripts/`.  
-**Last Updated**: 2026-06-03
+**Status**: Phase 1 complete + v2 polish — standalone agent implemented; signals pipeline unified under `scripts/`.  
+**Last Updated**: 2026-06-03 (polish session)
 
 ---
 
@@ -65,14 +65,21 @@ See `INTEGRATION_DESIGN.md` and `PHASE2_IMPLEMENTATION_PLAN.md` for Phase 2 step
 - [x] `quantitative_analyst.py` implementation
 - [x] Test harness: `test_quant_analyst.py`
 - [x] Unify signals pipeline (`stock_signals.py` canonical)
+- [x] More signals (quality/GP-accruals, vol-price corr, formulaic alpha, turnover)
+- [x] Richer ensemble metadata surfaced (consensus, trend, disagreement, #models)
+- [x] Tunable `compute_quant_conviction()` helper with clear tuning comments
+- [x] Per-signal safe fetching + warnings collection (robust error paths)
+- [x] Structured return (`quantitative_signals`, `quantitative_conviction`, `quantitative_warnings`)
+- [x] v2 debate stub: `debate_mode` + `_generate_debate_stub` (template, LLM-upgrade path documented)
 
 ---
 
 ## 5. Open Todos (Phase 2)
 
-- [ ] Port agent to `tradingagents/agents/analysts/quantitative_analyst.py`
+- [ ] Port agent (with debate_mode / structured fields) to `tradingagents/agents/analysts/quantitative_analyst.py`
 - [ ] Register in GraphSetup / `selected_analysts`
-- [ ] End-to-end test inside TradingAgents
+- [ ] End-to-end test inside TradingAgents (with real llm for optional debate turn)
+- [ ] (Optional) Add actual light LLM call inside `_generate_debate_stub` when llm provided
 
 ---
 
@@ -83,6 +90,7 @@ See `INTEGRATION_DESIGN.md` and `PHASE2_IMPLEMENTATION_PLAN.md` for Phase 2 step
 | 2026-05-16 | Design docs + agent skeleton | In progress |
 | 2026-05-16 | Full signal integration + polish | Done |
 | 2026-06-03 | Unified canonical `scripts/` pipeline; updated PLAN | Done |
+| 2026-06-03 | v2 polish: more signals, conviction helper, safe errors, structured outputs, debate stub | Done |
 
 ---
 

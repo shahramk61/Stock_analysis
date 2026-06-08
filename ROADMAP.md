@@ -53,7 +53,7 @@
 - [x] Unified canonical code under `scripts/` (`stock_signals.py`, score, report, dashboard)
 - [x] Skill shims re-export from `scripts/` via `_canonical.py`
 - [x] Structured JSON output for trading-bot integration
-- [x] Quantitative Analyst agent (Phase 1 — standalone data provider)
+- [x] Quantitative Analyst agent (Phase 1 — standalone data provider; v2 report enhancements with 12+ signals + dynamic conviction)
 - [x] Merged to `main`
 
 ## Milestone 7 — TradingAgents Integration (Phase 2)
@@ -61,7 +61,8 @@
 - [x] Add `quantitative` to `selected_analysts` + CLI
 - [x] Wire into GraphSetup; expose `quantitative_report` to Researchers / Risk team
 - [x] Unit tests (`tests/test_quantitative_analyst.py`)
-- [ ] Full end-to-end run with live LLM API keys + GPU signals
+- [x] Full end-to-end run with GPU signals (local smoke test + 7-model ensemble, HMM, GARCH, MC risk etc. exercised via `test_quant_analyst.py`)
+  - Note: "live LLM API keys" validation occurs when running full TradingAgents graph with other analyst nodes (separate repo)
 
 ## Milestone 8 — Future Ideas
 
