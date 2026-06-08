@@ -194,6 +194,8 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
                 get_volume_price_correlation,
                 get_simple_formulaic_alpha,
                 get_share_turnover,
+                # X / social news & sentiment (new for richer debates)
+                get_x_ticker_sentiment,
             )
             signals_available = True
         except Exception as e:
@@ -254,6 +256,9 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
         vol_price_data = _safe_fetch("vol_price_corr", get_volume_price_correlation, {"vol_price_corr": 0.0, "interpretation": "Neutral"}, warnings, ticker)
         formulaic_data = _safe_fetch("formulaic_alpha", get_simple_formulaic_alpha, {"alpha": 0.0, "alpha_signal": "Neutral"}, warnings, ticker)
         turnover_data  = _safe_fetch("share_turnover", get_share_turnover, {"turnover": 0.0}, warnings, ticker)
+
+        # X / social news & sentiment (new for richer debates; recent-only, graceful in backtests)
+        x_data         = _safe_fetch("x_sentiment", get_x_ticker_sentiment, {"volume": 0, "sentiment_score": 50.0, "overall_sentiment": "Neutral", "num_posts": 0, "note": "X data not available"}, warnings, ticker)
 
         # --- Richer ensemble metadata from horizon_data ---
         horizons = horizon_data.get("horizons", {})
@@ -355,6 +360,10 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
 - Beta (vs SPY): {beta_data.get('beta', 'N/A')} (α: {beta_data.get('alpha', 'N/A')})
 - Earnings surprise (avg 8q): {earnings_data.get('avg_surprise_pct', 'N/A')}%
 
+**X / Social (recent)**
+- Posts (approx): {x_data.get('num_posts', 0)} | Sentiment: {x_data.get('overall_sentiment', 'N/A')} (score: {x_data.get('sentiment_score', 'N/A')})
+- Note: {x_data.get('note', x_data.get('highlights', 'N/A'))}
+
 **Conviction Level**: {conviction} (raw score: {raw_score})
 
 **Key Takeaways**
@@ -375,6 +384,11 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
                 f"VaR {risk_data.get('var_95')}% | regime {regime_str} | "
                 f"Piotroski {piotroski} | Mom6m {mom_data.get('mom_6m')}% | IVR {iv_data.get('ivr')}%"
             )
+            # Include X/social if we have meaningful recent data (volume or non-neutral sentiment)
+            x_vol = x_data.get('num_posts', 0) or 0
+            x_sent = x_data.get('overall_sentiment', 'Neutral')
+            if x_vol > 5 or x_sent not in ('Neutral', 'N/A'):
+                hl += f" | X vol ~{x_vol}, {x_sent} sentiment"
             debate_commentary = _generate_debate_stub(ticker, conviction, regime_str, hl)
 
         # --- Structured output for downstream agents (highly valuable in TradingAgents) ---
@@ -405,6 +419,7 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
             "earnings_surprise": earnings_data.get("avg_surprise_pct"),
             "garch": garch_data,
             "atr": atr_data,
+            "x_sentiment": x_data,
         }
 
         return {

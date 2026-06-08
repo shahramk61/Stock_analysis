@@ -15,6 +15,11 @@ lightning_logs/
 # Generated signal JSON files
 signals_*.json
 
+# Backtest artifacts (decisions, simulated trade logs)
+backtest_decisions_*.json
+backtest_trade_log*.csv
+*.backtest.json
+
 # Connector / push test artifacts
 test_push.txt
 test_connector_push.txt

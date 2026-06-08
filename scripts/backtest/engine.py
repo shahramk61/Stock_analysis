@@ -49,6 +49,7 @@ class Backtester:
         risk_per_trade: float = 0.01,  # 1% risk example
         rebalance_days: int = 5,  # e.g. weekly-ish
         fast_mode: bool = False,
+        debate_mode: bool = False,
         # policy: Optional[Callable] = None,
     ):
         self.ticker = ticker.upper()
@@ -59,6 +60,7 @@ class Backtester:
         self.risk_per_trade = risk_per_trade
         self.rebalance_days = rebalance_days
         self.fast_mode = fast_mode
+        self.debate_mode = debate_mode
         # self.policy = policy or default_policy
 
         self._data: Optional[Dict[str, Any]] = None
@@ -111,17 +113,9 @@ class Backtester:
             try:
                 from score import calculate_pillars
                 dyn = not self.fast_mode
-                if self.fast_mode:
-                    # Stub heavy GPU signals for fast backtests (price/stat signals still run with hist)
-                    import score as _score_mod
-                    orig_calc = _score_mod.calculate_pillars
-                    def _fast_calc(data, profile="Balanced", compute_dynamic_weights=False, hist=None, asof=None):
-                        # Temporarily disable GPU prints/runs by patching inside, but for simplicity run and accept
-                        # For true fast, user can edit or we can add flag to calculate_pillars later
-                        return orig_calc(data, profile, compute_dynamic_weights=False, hist=hist, asof=asof)
-                    scores = _fast_calc(replay_data, self.profile, dyn, hist=hist_slice, asof=str(asof))
-                else:
-                    scores = calculate_pillars(replay_data, self.profile, compute_dynamic_weights=dyn, hist=hist_slice, asof=str(asof))
+                use_gpu = not self.fast_mode
+                scores = calculate_pillars(replay_data, self.profile, compute_dynamic_weights=dyn,
+                                           hist=hist_slice, asof=str(asof), use_gpu_signals=use_gpu)
             except Exception as e:
                 scores = {"overall": 50.0, "signals": {}, "error": str(e)[:100]}
 
@@ -129,7 +123,7 @@ class Backtester:
             quant_out = {}
             try:
                 from agents.quantitative_analyst.quantitative_analyst import create_quantitative_analyst
-                quant_node = create_quantitative_analyst()
+                quant_node = create_quantitative_analyst(debate_mode=self.debate_mode)
                 q_state = {"ticker": self.ticker, "company_of_interest": self.ticker, "messages": []}
                 quant_out = quant_node(q_state)
             except Exception as e:
@@ -154,16 +148,27 @@ class Backtester:
             atr = scores.get("signals", {}).get("atr_vol", {})
             mcr = scores.get("signals", {}).get("mc_risk", {})
 
-            # Simple simulator (basic long entry on policy signal, mark-to-market; stops/ exits in next iterations)
+            debate_note = quant_out.get("quantitative_debate_commentary", "") if self.debate_mode else ""
+            quant_report = quant_out.get("quantitative_report", "") if self.debate_mode else ""
+
+            # Simple simulator — this is "paper trading" the agent's decisions
+            # We apply a small round-trip cost assumption here so the equity curve
+            # is closer to what real trading would feel like.
+            COMMISSION_PCT = 0.001   # 0.1% round-trip (tune per broker)
+            SLIPPAGE_PCT  = 0.0005   # 0.05% one-way slippage
+
             if action == "long" and position == 0 and cash > 0:
                 risk_amt = cash * self.risk_per_trade
-                # crude size using ATR if available
                 atr_val = float(atr.get("atr_percent", 2.0) or 2.0)
                 risk_per_share = max(current_price * 0.01, current_price * (atr_val / 100) * 1.5)
                 shares = max(1, int(risk_amt / risk_per_share))
+
+                # Apply entry costs
+                entry_cost = shares * current_price * (COMMISSION_PCT/2 + SLIPPAGE_PCT)
                 position = shares
                 entry_price = current_price
-                cash -= shares * current_price
+                cash -= (shares * current_price + entry_cost)
+
                 trades.append({
                     "entry_date": str(asof),
                     "entry_price": entry_price,
@@ -171,26 +176,35 @@ class Backtester:
                     "action": "long",
                     "conviction": sig.conviction,
                     "score": overall if 'overall' in locals() else scores.get("overall"),
+                    "entry_cost": round(entry_cost, 2),
                 })
 
-            # Very basic stop logic (if we have stop and price below)
+            # Stop / exit logic with realistic costs
             if position > 0 and stop and current_price < float(stop):
-                cash += position * current_price
+                exit_cost = position * current_price * (COMMISSION_PCT/2 + SLIPPAGE_PCT)
+                cash += (position * current_price - exit_cost)
                 if trades:
                     trades[-1]["exit_date"] = str(asof)
                     trades[-1]["exit_price"] = current_price
-                    trades[-1]["pnl"] = (current_price - entry_price) * position
+                    gross_pnl = (current_price - entry_price) * position
+                    net_pnl = gross_pnl - trades[-1].get("entry_cost", 0) - exit_cost
+                    trades[-1]["pnl"] = round(net_pnl, 2)
+                    trades[-1]["exit_cost"] = round(exit_cost, 2)
                 position = 0
 
-            # Mark to market
+            # Mark to market (unrealized)
             mtm_equity = cash + position * current_price
             equity_records.append({
                 "date": str(asof),
                 "equity": mtm_equity,
                 "price": current_price,
                 "position": position,
+                "overall_score": scores.get("overall"),
                 "conviction": getattr(sig, 'conviction', None) if 'sig' in locals() else None,
                 "action": getattr(sig, 'action', None) if 'sig' in locals() else action,
+                "rationale": getattr(sig, 'rationale', None) if 'sig' in locals() else None,
+                "debate_note": debate_note if debate_note else None,
+                "quant_report": quant_report if quant_report else None,
             })
 
         eq_df = pd.DataFrame(equity_records)
@@ -199,10 +213,37 @@ class Backtester:
             eq_df = eq_df.set_index("date")
             eq_df["returns"] = eq_df["equity"].pct_change().fillna(0)
             eq_df["cum_returns"] = (1 + eq_df["returns"]).cumprod() - 1
-            # TODO: drawdown calc
+
+            # Simple drawdown
+            roll_max = eq_df["equity"].cummax()
+            eq_df["drawdown"] = (eq_df["equity"] - roll_max) / roll_max
 
         # Use metrics (Phase 3 progress)
         metrics = compute_metrics(eq_df, trades)
+
+        # Basic buy-and-hold benchmark using the price series we already loaded
+        bench_metrics = {}
+        if not price_series.empty and len(price_series) > 1:
+            start_px = float(price_series.iloc[0].item() if hasattr(price_series.iloc[0], 'item') else price_series.iloc[0])
+            end_px = float(price_series.iloc[-1].item() if hasattr(price_series.iloc[-1], 'item') else price_series.iloc[-1])
+            bh_return = (end_px / start_px) - 1
+            bench_metrics["bh_total_return"] = round(bh_return * 100, 2)
+            # rough annualized
+            days = (pd.to_datetime(self.end) - pd.to_datetime(self.start)).days or 1
+            years = days / 365.25
+            if years > 0:
+                bench_metrics["bh_cagr"] = round(((end_px / start_px) ** (1 / years) - 1) * 100, 2)
+            metrics["vs_bh"] = bench_metrics.get("bh_total_return", 0) - metrics.get("total_return", 0)
+
+        # Attach the raw trades list so callers (CLI, future live runner) can see every executed trade
+        # with realistic costs, P&L, conviction, etc. This is the "trade blotter" of the agent.
+        result_trades = trades  # will be stored on the BacktestResult below
+
+        # For convenience in the JSON export and live bridge, also keep the final policy signals
+        # per rebalance date (the "orders" the agent would have sent to a broker).
+
+        # bt-08: basic no-lookahead note (the hist passed to pillars is strictly sliced <= asof)
+        # For stronger validation later: compare scores at D vs what analyze.py would produce on a frozen snapshot of that date.
 
         return BacktestResult(
             ticker=self.ticker,

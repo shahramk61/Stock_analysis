@@ -13,9 +13,11 @@ from gpu_utils import gpu_available
 
 
 def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False,
-                      hist: "pd.DataFrame | None" = None, asof: str | None = None):
+                      hist: "pd.DataFrame | None" = None, asof: str | None = None,
+                      use_gpu_signals: bool = True):
     """Compute pillars and signals. Supports `hist` (pre-sliced DataFrame) and `asof` for historical backtesting replay.
     Falls back to live fetches when hist/asof not provided (preserves original behavior).
+    Set use_gpu_signals=False for fast backtests (skips LSTM/Chronos/ensemble training).
     """
     ticker = data['ticker']
     info   = data['info']
@@ -45,14 +47,22 @@ def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_wei
     mc_risk         = get_monte_carlo_risk(ticker, **kw)
 
     # ── GPU signals (with CPU fallback) ──────────────────────────────────────
-    gpu = gpu_available()
-    print(f"{'🖥️  Running GPU signals (LSTM, Chronos-2, FinBERT, 5-model Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
+    if use_gpu_signals:
+        gpu = gpu_available()
+        print(f"{'🖥️  Running GPU signals (LSTM, Chronos-2, FinBERT, 5-model Ensemble)...' if gpu else '💻 Running ML signals on CPU...'}", flush=True)
 
-    lstm        = get_lstm_forecast(ticker)
-    chronos     = get_chronos_forecast(ticker)
-    finbert     = get_finbert_sentiment(ticker)
-    dl_ensemble = get_nhits_tft_patchtst_ensemble(ticker)
-    multi_h     = get_multi_horizon_forecasts(ticker, compute_dynamic_weights=compute_dynamic_weights)
+        lstm        = get_lstm_forecast(ticker)
+        chronos     = get_chronos_forecast(ticker)
+        finbert     = get_finbert_sentiment(ticker)
+        dl_ensemble = get_nhits_tft_patchtst_ensemble(ticker)
+        multi_h     = get_multi_horizon_forecasts(ticker, compute_dynamic_weights=compute_dynamic_weights)
+    else:
+        # Fast backtest mode: neutral stubs for heavy signals
+        lstm = {"predicted_return_pct": 0.0, "direction": "Neutral", "signal_strength": 0}
+        chronos = {"predicted_return_pct": 0.0, "direction": "Neutral"}
+        finbert = {"overall_sentiment": "Neutral", "sentiment_score": 50.0}
+        dl_ensemble = {"predicted_return_pct": 0.0}
+        multi_h = {"horizons": {}, "consensus_direction": "Neutral", "trend_signal": "Stable"}
 
     # ── Pillar scoring ───────────────────────────────────────────────────────
     dcf_upside = dcf_val.get('upside_pct', 0) if dcf_val.get('available') else 0
