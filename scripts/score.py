@@ -12,30 +12,37 @@ from dcf import calculate_dcf
 from gpu_utils import gpu_available
 
 
-def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False):
+def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False,
+                      hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Compute pillars and signals. Supports `hist` (pre-sliced DataFrame) and `asof` for historical backtesting replay.
+    Falls back to live fetches when hist/asof not provided (preserves original behavior).
+    """
     ticker = data['ticker']
     info   = data['info']
 
+    # Pass hist/asof to signals that support replay (many price/vol based now do; fundamentals use live for now)
+    kw = {"hist": hist, "asof": asof}
+
     # ── CPU signals ──────────────────────────────────────────────────────────
-    iv_signal       = get_iv_rank_and_skew(ticker)
+    iv_signal       = get_iv_rank_and_skew(ticker, **kw)
     distress        = calculate_altman_beneish(ticker)
     earnings        = get_earnings_surprise(ticker)
-    beta            = get_rolling_beta(ticker)
+    beta            = get_rolling_beta(ticker, **kw)
     dcf_val         = calculate_dcf(data)
     piotroski       = calculate_piotroski_f_score(ticker)
-    atr_vol         = get_atr_volatility_clustering(ticker)
-    rs              = get_relative_strength(ticker)
-    regime          = get_market_regime(ticker)
-    garch           = get_garch_forecast(ticker)
-    momentum        = get_momentum_and_52w_high(ticker)
+    atr_vol         = get_atr_volatility_clustering(ticker, **kw)
+    rs              = get_relative_strength(ticker, **kw)
+    regime          = get_market_regime(ticker, **kw)
+    garch           = get_garch_forecast(ticker, **kw)
+    momentum        = get_momentum_and_52w_high(ticker, **kw)
     quality         = get_quality_accruals_gross_profit(ticker)
-    amihud          = get_amihud_illiquidity(ticker)
-    turnover        = get_share_turnover(ticker)
-    vol_price       = get_volume_price_correlation(ticker)
-    formulaic_alpha = get_simple_formulaic_alpha(ticker)
-    obv             = get_obv(ticker)
-    cmf             = get_chaikin_money_flow(ticker)
-    mc_risk         = get_monte_carlo_risk(ticker)
+    amihud          = get_amihud_illiquidity(ticker, **kw)
+    turnover        = get_share_turnover(ticker, **kw)
+    vol_price       = get_volume_price_correlation(ticker, **kw)
+    formulaic_alpha = get_simple_formulaic_alpha(ticker, **kw)
+    obv             = get_obv(ticker, **kw)
+    cmf             = get_chaikin_money_flow(ticker, **kw)
+    mc_risk         = get_monte_carlo_risk(ticker, **kw)
 
     # ── GPU signals (with CPU fallback) ──────────────────────────────────────
     gpu = gpu_available()

@@ -4,7 +4,8 @@ import numpy as np
 from datetime import datetime, timedelta
 import statsmodels.api as sm
 
-def get_iv_rank_and_skew(ticker: str):
+def get_iv_rank_and_skew(ticker: str, *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """IV rank/skew using options + historical vol. Supports hist/asof for backtests."""
     stock = yf.Ticker(ticker)
     try:
         expirations = stock.options
@@ -22,8 +23,11 @@ def get_iv_rank_and_skew(ticker: str):
         
         current_iv = (calls['impliedVolatility'].mean() + puts['impliedVolatility'].mean()) / 2
         
-        hist = stock.history(period="1y")
-        hist_vol = hist['Close'].pct_change().std() * np.sqrt(252)
+        if hist is None:
+            h = stock.history(period="1y")
+        else:
+            h = hist
+        hist_vol = (h['Close'] if 'Close' in h.columns else h.iloc[:,0]).pct_change().std() * np.sqrt(252)
         ivr = min(max((current_iv - hist_vol * 0.7) / (hist_vol * 1.5) * 100, 0), 100)
         
         skew = (puts['impliedVolatility'].mean() - calls['impliedVolatility'].mean())
@@ -80,12 +84,17 @@ def get_earnings_surprise(ticker: str):
     except:
         return {"avg_surprise_pct": 0.0, "post_earnings_drift": 0.0}
 
-def get_rolling_beta(ticker: str, period="5y"):
-    stock = yf.Ticker(ticker)
+def get_rolling_beta(ticker: str, period="5y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Rolling beta vs SPY + alpha decomposition. Supports hist/asof for backtests."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     spy = yf.Ticker("SPY")
     try:
         data = pd.DataFrame({
-            ticker: stock.history(period=period)['Close'].pct_change(),
+            ticker: h['Close'].pct_change() if 'Close' in h.columns else h.iloc[:,0].pct_change(),
             'SPY': spy.history(period=period)['Close'].pct_change()
         }).dropna()
         
@@ -127,10 +136,16 @@ def calculate_piotroski_f_score(ticker: str):
     except:
         return 5
 
-def get_atr_volatility_clustering(ticker: str, period="1y"):
-    """New Signal: ATR-based risk + Volatility Clustering"""
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period=period)
+def get_atr_volatility_clustering(ticker: str, period="1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """New Signal: ATR-based risk + Volatility Clustering.
+    Supports historical replay via pre-sliced `hist` (preferred for backtests) or `asof` cutoff.
+    """
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        if asof:
+            hist = stock.history(period=period, end=asof)
+        else:
+            hist = stock.history(period=period)
     
     # ATR (14-day)
     high_low = hist['High'] - hist['Low']
@@ -153,18 +168,19 @@ def get_atr_volatility_clustering(ticker: str, period="1y"):
         "risk_level": "Elevated" if clustering == "High" else "Normal"
     }
 
-def get_relative_strength(ticker: str, period="5y"):
-    """New Signal: Relative Strength vs SPY and Sector"""
-    stock = yf.Ticker(ticker)
+def get_relative_strength(ticker: str, period="5y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """New Signal: Relative Strength vs SPY and Sector. Supports hist/asof for backtests."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     spy = yf.Ticker("SPY")
-    
-    # Get sector ETF (approximate)
-    sector_map = {"AAPL": "XLK", "TSLA": "XLY", "NVDA": "SMH"}  # expand as needed
+    sector_map = {"AAPL": "XLK", "TSLA": "XLY", "NVDA": "SMH"}
     sector_etf = yf.Ticker(sector_map.get(ticker.upper(), "SPY"))
-    
     try:
         data = pd.DataFrame({
-            ticker: stock.history(period=period)['Close'].pct_change(),
+            ticker: h['Close'].pct_change() if 'Close' in h.columns else h.iloc[:,0].pct_change(),
             'SPY': spy.history(period=period)['Close'].pct_change(),
             'Sector': sector_etf.history(period=period)['Close'].pct_change()
         }).dropna()
@@ -186,18 +202,24 @@ def get_relative_strength(ticker: str, period="5y"):
     except:
         return {"rs_spy": 0, "rs_sector": 0, "outperforming_spy": False, "outperforming_sector": False}
 
-def get_momentum_and_52w_high(ticker: str, period: str = "5y"):
-    """Price momentum (6m, 12m) and proximity to 52-week high (Novy-Marx momentum)."""
-    stock = yf.Ticker(ticker)
+def get_momentum_and_52w_high(ticker: str, period: str = "5y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Price momentum (6m, 12m) and proximity to 52-week high (Novy-Marx momentum).
+    Supports historical replay via pre-sliced `hist` or `asof` cutoff (for backtests).
+    """
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)['Close']
-        if len(hist) < 252:
+        close = h['Close'] if 'Close' in h.columns else h.iloc[:, 0]
+        if len(close) < 252:
             return {"mom_6m": 0.0, "mom_12m": 0.0, "pct_from_52w_high": 0.0, "signal": "Neutral"}
 
-        mom_6m  = float((hist.iloc[-1] / hist.iloc[-126] - 1) * 100)
-        mom_12m = float((hist.iloc[-1] / hist.iloc[-252] - 1) * 100)
-        high_52w = float(hist.tail(252).max())
-        pct_from_high = float((hist.iloc[-1] / high_52w - 1) * 100)
+        mom_6m  = float((close.iloc[-1] / close.iloc[-126] - 1) * 100)
+        mom_12m = float((close.iloc[-1] / close.iloc[-252] - 1) * 100)
+        high_52w = float(close.tail(252).max())
+        pct_from_high = float((close.iloc[-1] / high_52w - 1) * 100)
 
         signal = ("Strong Momentum" if mom_6m > 10 and mom_12m > 15
                   else "Momentum"   if mom_6m > 0  and mom_12m > 0
@@ -253,13 +275,17 @@ def get_quality_accruals_gross_profit(ticker: str):
         return {"gross_profitability": 0.0, "accruals_ratio": 0.0, "quality": "Unknown", "high_quality": False}
 
 
-def get_market_regime(ticker: str, period: str = "5y", n_states: int = 3):
+def get_market_regime(ticker: str, period: str = "5y", n_states: int = 3, *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Hidden Markov Model (HMM) for market regime detection.
     Detects Bull/Neutral/Bear regimes based on returns.
-    High impact for adaptive trading and risk management."""
-    stock = yf.Ticker(ticker)
+    High impact for adaptive trading and risk management. Supports hist/asof for backtests."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h  # use provided or fetched
         if len(hist) < 100:
             return {"regime": "Neutral", "probs": [0.33, 0.34, 0.33], "means": [0.0, 0.0, 0.0]}
         returns = hist['Close'].pct_change().dropna().values.reshape(-1, 1)
@@ -285,13 +311,17 @@ def get_market_regime(ticker: str, period: str = "5y", n_states: int = 3):
     except Exception as e:
         return {"regime": "Neutral", "probs": [0.33, 0.34, 0.33], "means": [0.0, 0.0, 0.0]}
 
-def get_garch_forecast(ticker: str, period: str = "5y", horizon: int = 5):
+def get_garch_forecast(ticker: str, period: str = "5y", horizon: int = 5, *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """GARCH(1,1) volatility forecast.
     Provides forward-looking volatility for better Monte Carlo and risk sizing.
-    High impact for accurate risk management."""
-    stock = yf.Ticker(ticker)
+    High impact for accurate risk management. Supports hist/asof for backtests."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         returns = hist['Close'].pct_change().dropna() * 100  # percent for arch
         if len(returns) < 50:
             return {"garch_vol_forecast": 0.0, "historical_vol": 0.0, "vol_ratio": 1.0}
@@ -310,11 +340,15 @@ def get_garch_forecast(ticker: str, period: str = "5y", horizon: int = 5):
     except Exception as e:
         return {"garch_vol_forecast": 0.0, "historical_vol": 0.0, "vol_ratio": 1.0}
 
-def get_amihud_illiquidity(ticker: str, period: str = "1y"):
-    """Amihud Illiquidity: avg(|return| / $volume). Higher values = lower liquidity. Scaled for readability."""
-    stock = yf.Ticker(ticker)
+def get_amihud_illiquidity(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Amihud Illiquidity: avg(|return| / $volume). Higher values = lower liquidity. Scaled for readability. Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         if len(hist) < 20:
             return {"amihud": 0.0}
         ret = hist['Close'].pct_change().abs()
@@ -324,11 +358,15 @@ def get_amihud_illiquidity(ticker: str, period: str = "1y"):
     except:
         return {"amihud": 0.0}
 
-def get_share_turnover(ticker: str, period: str = "1y"):
-    """Annualized share turnover (%): avg daily volume / shares outstanding."""
-    stock = yf.Ticker(ticker)
+def get_share_turnover(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Annualized share turnover (%): avg daily volume / shares outstanding. Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         info = stock.info
         shares = info.get('sharesOutstanding', 0) or info.get('impliedSharesOutstanding', 0)
         if shares == 0 or len(hist) == 0:
@@ -339,12 +377,16 @@ def get_share_turnover(ticker: str, period: str = "1y"):
     except:
         return {"turnover": 0.0}
 
-def get_volume_price_correlation(ticker: str, period: str = "1y"):
+def get_volume_price_correlation(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Custom Formulaic Alpha: correlation between price returns and volume changes.
-    Positive correlation = volume confirms price moves (bullish confirmation)."""
-    stock = yf.Ticker(ticker)
+    Positive correlation = volume confirms price moves (bullish confirmation). Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         if len(hist) < 30:
             return {"vol_price_corr": 0.0, "interpretation": "Neutral"}
         returns = hist['Close'].pct_change().dropna()
@@ -358,12 +400,16 @@ def get_volume_price_correlation(ticker: str, period: str = "1y"):
     except:
         return {"vol_price_corr": 0.0, "interpretation": "Neutral"}
 
-def get_simple_formulaic_alpha(ticker: str, period: str = "1y"):
+def get_simple_formulaic_alpha(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Simple Alpha 101-inspired formulaic alpha: normalized intraday momentum ((close-open)/(high-low)).
-    Rolling 5-day average. Positive = bullish pressure."""
-    stock = yf.Ticker(ticker)
+    Rolling 5-day average. Positive = bullish pressure. Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         if len(hist) < 10:
             return {"alpha": 0.0, "alpha_signal": "Neutral"}
         close = hist['Close']
@@ -380,12 +426,16 @@ def get_simple_formulaic_alpha(ticker: str, period: str = "1y"):
     except:
         return {"alpha": 0.0, "alpha_signal": "Neutral"}
 
-def get_obv(ticker: str, period: str = "1y"):
+def get_obv(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """On-Balance Volume (OBV): cumulative signed volume based on price direction.
-    20-day % change signals accumulation/distribution."""
-    stock = yf.Ticker(ticker)
+    20-day % change signals accumulation/distribution. Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         if len(hist) < 21:
             return {"obv": 0.0, "obv_change_20d_pct": 0.0}
         close = hist['Close']
@@ -402,12 +452,16 @@ def get_obv(ticker: str, period: str = "1y"):
     except:
         return {"obv": 0.0, "obv_change_20d_pct": 0.0}
 
-def get_chaikin_money_flow(ticker: str, period: str = "1y", window: int = 20):
+def get_chaikin_money_flow(ticker: str, period: str = "1y", window: int = 20, *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Chaikin Money Flow (CMF): 20-period measure of buying vs selling pressure.
-    >0.05 Bullish, <-0.05 Bearish."""
-    stock = yf.Ticker(ticker)
+    >0.05 Bullish, <-0.05 Bearish. Supports hist/asof."""
+    if hist is None:
+        stock = yf.Ticker(ticker)
+        h = stock.history(period=period)
+    else:
+        h = hist
     try:
-        hist = stock.history(period=period)
+        hist = h
         if len(hist) < window + 5:
             return {"cmf": 0.0, "cmf_signal": "Neutral"}
         high = hist['High']
@@ -428,13 +482,21 @@ def get_chaikin_money_flow(ticker: str, period: str = "1y", window: int = 20):
 
 
 def get_monte_carlo_risk(ticker: str, paths: int = 10000,
-                         horizon_days: int = 252, confidence: float = 0.95):
+                         horizon_days: int = 252, confidence: float = 0.95,
+                         *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """
     GBM Monte Carlo downside risk: 1-year 95% VaR and CVaR (Expected Shortfall).
     Uses 5y of history for drift/vol estimation. CPU-only, vectorised numpy.
+
+    Backtest-friendly: pass pre-sliced `hist` (as-of) or `asof` date to avoid look-ahead.
     """
     try:
-        hist    = yf.Ticker(ticker).history(period="5y")
+        if hist is None:
+            stock = yf.Ticker(ticker)
+            if asof:
+                hist = stock.history(period="5y", end=asof)
+            else:
+                hist = stock.history(period="5y")
         if len(hist) < 100:
             return {"var_95": 20.0, "cvar_95": 28.0,
                     "simulated_annual_vol": 35.0, "annual_drift": 8.0}
