@@ -34,8 +34,16 @@ sigs = result.get("quantitative_signals", {})
 print("Signals keys:", list(sigs.keys()))
 print("Regime from signals:", sigs.get("regime", {}).get("regime"))
 print("Consensus from ensemble:", sigs.get("multi_horizon", {}).get("consensus_direction"))
+print("Schema valid:", sigs.get("schema_valid"), "version:", sigs.get("schema_version"))
+if sigs.get("schema_errors"):
+    print("Schema errors:", sigs.get("schema_errors"))
 
 print("\n--- v2 debate stub (explicit debate_mode) ---")
 quant_node_v2 = create_quantitative_analyst(debate_mode=True)
-result_v2 = quant_node_v2(state)
-print("Debate note:", result_v2.get("quantitative_debate_commentary", ""))
+result_v2 = quant_node_v2({"ticker": "AAPL", "company_of_interest": "AAPL", "messages": [], "use_forecasts": False})
+print("Debate note:", result_v2.get("quantitative_debate_commentary", "")[:500])
+print("Conviction:", result_v2.get("quantitative_conviction"))
+var = (result_v2.get("quantitative_signals") or {}).get("risk", {}).get("var_95")
+print("VaR95:", var)
+if var is not None and float(var) > 20:
+    assert "VaR" in (result_v2.get("quantitative_debate_commentary") or ""), "elevated VaR must appear in debate"

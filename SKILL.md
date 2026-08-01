@@ -46,6 +46,17 @@ Pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 over
 3. For multi-ticker ranking, score each then present a sorted table + Top 3.
 4. Cite real pipeline outputs only — no fabricated prices, scores, or fundamentals.
 5. For validation / paper trading research, use `scripts/backtest.py` with `--fast`.
+6. Multi-agent role cards: `scripts/agents/PROMPTS.md`. Quant schema: `schemas.py`.
+
+## Integrity failure modes
+
+| Failure | Response |
+|---------|----------|
+| Number inventing | Refuse; re-run pipeline |
+| Role drift (quant as bull/trader) | Quant = data provider only |
+| Weak risk surfacing | Always quote elevated VaR / Bear / distress Z |
+| Soft conviction language | Only High / Medium / Low |
+| Format drift | Require `quantitative_signals.schema_valid` |
 
 ## Key modules
 

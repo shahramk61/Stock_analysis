@@ -6,7 +6,12 @@ Uses local models + classical indicators (RSI/MACD/SMA/ADX), HMM/GARCH,
 Monte Carlo risk, liquidity/volume alphas, quality, momentum, X/social.
 
 v1: Rich data provider (quantitative_report + structured signals).
-v2: Optional debate_commentary (template-driven; LLM-upgradeable).
+v2: Optional debate_commentary (template-driven; optional LLM phrasing only).
+
+Role boundary (do not drift):
+- Supply quant/risk data and signals-only debate input.
+- Do NOT act as bull/bear researcher or issue free-form BUY/SELL calls.
+- Numbers must come from computed signals — never invent metrics.
 """
 
 import os
@@ -16,6 +21,19 @@ from typing import Dict, Any
 _SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _SCRIPTS not in sys.path:
     sys.path.insert(0, _SCRIPTS)
+
+try:
+    from agents.quantitative_analyst.schemas import (  # noqa: E402
+        normalize_conviction,
+        normalize_quantitative_signals,
+        llm_rephrase_debate,
+    )
+except ImportError:
+    from schemas import (  # type: ignore  # noqa: E402
+        normalize_conviction,
+        normalize_quantitative_signals,
+        llm_rephrase_debate,
+    )
 
 
 # --- Helpers for robustness and v2 features ---------------------------------
@@ -115,7 +133,7 @@ def compute_quant_conviction(
         if vol_corr < -0.2:
             risk_score += 1  # volume diverging from price = caution
 
-        # Map to label (tune these cutoffs)
+        # Map to label (tune these cutoffs) — enum only: High | Medium | Low
         if risk_score >= 6:
             conviction = "Low"
         elif risk_score >= 3:
@@ -123,7 +141,7 @@ def compute_quant_conviction(
         else:
             conviction = "High"
 
-        return conviction, risk_score
+        return normalize_conviction(conviction), risk_score
     except Exception:
         return "Medium", 3
 
@@ -454,7 +472,7 @@ Neural ensemble median + statistical overlays (HMM regime, GARCH forward vol, li
 Rich quantitative data layer ready for Researcher debate, risk sizing, and Trader decisioning.
 """
 
-        # --- Rich debate contribution (multi-point, signals-only, supports multi-turn) ---
+        # --- Debate contribution: facts template first; LLM may only rephrase ---
         debate_commentary = ""
         use_debate = debate_mode or (llm is not None)
         if use_debate:
@@ -464,13 +482,12 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
                 f"Quality {quality_data.get('quality', 'Unknown')} | Earnings surprise {earnings_data.get('avg_surprise_pct', 'N/A')}% | "
                 f"Beta {beta_data.get('beta', 'N/A')}"
             )
-            # Include X/social if we have meaningful recent data (volume or non-neutral sentiment)
             x_vol = x_data.get('num_posts', 0) or 0
             x_sent = x_data.get('overall_sentiment', 'Neutral')
             if x_vol > 5 or x_sent not in ('Neutral', 'N/A'):
                 hl += f" | X vol ~{x_vol}, {x_sent} sentiment"
 
-            debate_commentary = _generate_quant_debate_contribution(
+            facts_block = _generate_quant_debate_contribution(
                 ticker, conviction, regime_str, hl,
                 takeaways=takeaways,
                 x_data=x_data,
@@ -481,9 +498,15 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
                 iv_data=iv_data,
                 liquidity_data={"cmf": cmf_data.get("cmf"), "vol_price_corr": vol_price_data.get("vol_price_corr")}
             )
+            debate_commentary = facts_block
+            if llm is not None:
+                rephrased, llm_warns = llm_rephrase_debate(llm, facts_block)
+                debate_commentary = rephrased
+                warnings.extend(llm_warns)
 
-        # --- Structured output for downstream agents (highly valuable in TradingAgents) ---
-        quantitative_signals = {
+        # --- Structured output (schema-normalized) for downstream agents ---
+        conviction = normalize_conviction(conviction)
+        quantitative_signals = normalize_quantitative_signals({
             "ticker": ticker,
             "conviction": conviction,
             "raw_conviction_score": raw_score,
@@ -493,8 +516,8 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
                 "trend_signal": trend,
                 "model_disagreement": disagreement,
             },
-            "risk": risk_data,
-            "regime": regime_data,
+            "risk": risk_data if isinstance(risk_data, dict) else {},
+            "regime": regime_data if isinstance(regime_data, dict) else {"regime": regime_str},
             "quality": quality_data,
             "momentum": mom_data,
             "liquidity_flow": {
@@ -514,7 +537,11 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
             "trend": trend_data,
             "adx": adx_data,
             "x_sentiment": x_data,
-        }
+        })
+        if not quantitative_signals.get("schema_valid", True):
+            warnings.extend(
+                [f"schema: {e}" for e in quantitative_signals.get("schema_errors", [])]
+            )
 
         return {
             "messages": state.get("messages", []) + [{"role": "assistant", "content": quantitative_report}],

@@ -120,7 +120,9 @@ scripts/
 ├── stock_signals.py      # Canonical signals (7-model ensemble, liquidity, etc.)
 ├── analyze.py, score.py, report.py, dashboard.py
 ├── backtest.py + backtest/   # Historical replay + policy + metrics
-└── agents/quantitative_analyst/
+└── agents/
+    ├── PROMPTS.md              # Static multi-agent role cards
+    └── quantitative_analyst/   # Quant node + JSON schema validators
 
 .grok/
 ├── skills/stock-analysis/   # Agent skill (primary)
