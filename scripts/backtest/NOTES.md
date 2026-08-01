@@ -12,6 +12,8 @@ This file captures the audit of existing decision/risk logic (from plan Phase 0)
 - **Risk filters (strict):** VaR>30 or Bear regime → flat; elevated VaR / bearish MACD+ADX/SMA → size cut.
 - **Execution model (corrected):** signal at decision close → **next open fill**; **daily stop on low** (gap → open); **flat exits** next open; size **cash-capped** (≤95% notional); equity marked daily; BH on test window only; live `info` not used in replay.
 - Demo / `--relaxed` paths removed.
+- **Multi-signal entry (`choose_entry`):** trend (SMA/ADX/MACD), multi-horizon consensus, FinBERT/news, plus classic score/conviction paths; hard VaR>30 / Bear regime / soft-path bearish consensus blocks; memory cooldown still wins.
+- **Fast mode:** skips multi-horizon training but keeps FinBERT (`use_gpu_signals=True`) so news leverage can fire without full ensemble cost.
 
 ### Role of Multi-Horizon Forecasts
 - Rich data in `multi_horizon_forecasts` (or `multi_h`): per-horizon median/avg/static-wgt/dynamic-wgt returns, direction, model_disagreement, num_models, consensus_direction, trend_signal, daily paths + dates + per-model breakdown for 5/10/15/20/50d.

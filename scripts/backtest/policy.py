@@ -1,18 +1,13 @@
 """
 Decision policy for the backtesting agent.
 
-Extracts / formalizes rules from current scoring + quant analyst + forecasts
-into explicit, configurable, auditable logic that produces TradeSignal.
-
-Phase 2: simple rules first (score + conviction + multi-horizon consensus).
-Later: pluggable, risk overlays, optimization guardrails.
-
-See approved plan + NOTES.md (audit of current thresholds).
+Uses multi-channel leverage (score, conviction, multi-horizon consensus,
+SMA/ADX trend, FinBERT/news, memory) with hard risk filters (VaR, Bear regime).
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, Tuple, List
 
 
 Action = Literal["long", "short", "flat"]
@@ -20,19 +15,191 @@ Action = Literal["long", "short", "flat"]
 
 @dataclass
 class TradeSignal:
-    """Clean, structured output from the agent at a point in time. Ideal for backtest + future execution."""
+    """Clean, structured output from the agent at a point in time."""
     ticker: str
     asof: str
     action: Action
-    conviction: str  # High/Medium/Low/Unknown (from quant or derived)
+    conviction: str
     overall_score: float
-    suggested_risk_pct: float  # e.g. 0.01 for 1% portfolio risk
+    suggested_risk_pct: float
     stop_price: Optional[float] = None
     target_price: Optional[float] = None
     horizon_days: Optional[int] = None
     rationale: str = ""
-    raw_score: Optional[int] = None  # from compute_quant_conviction if available
-    # TODO: add source_signals summary, max_position etc.
+    raw_score: Optional[int] = None
+
+
+def _dir_bull(s: Any) -> bool:
+    return "bull" in str(s or "").lower()
+
+
+def _dir_bear(s: Any) -> bool:
+    return "bear" in str(s or "").lower()
+
+
+def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Pure helper: normalize constructive/destructive channels from scores.signals
+    (and optional quant). Used by default_policy and unit tests.
+    """
+    signals = signals or {}
+    multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h") or {}
+    if not isinstance(multi, dict):
+        multi = {}
+    consensus = multi.get("consensus_direction", "Neutral")
+    # Quant may carry multi_horizon too
+    if quant_output and isinstance(quant_output, dict):
+        qs = quant_output.get("quantitative_signals") or {}
+        qmh = qs.get("multi_horizon") or {}
+        if isinstance(qmh, dict) and qmh.get("consensus_direction"):
+            # Prefer score multi_h if it has horizons; else quant
+            if not multi.get("horizons") and qmh.get("consensus_direction"):
+                consensus = qmh.get("consensus_direction", consensus)
+
+    trend = signals.get("trend") or {}
+    adx = signals.get("adx") or {}
+    classic = signals.get("classic") or {}
+    finbert = signals.get("finbert") or signals.get("finbert_sentiment") or {}
+    regime = (signals.get("regime") or {}).get("regime", "Neutral")
+    mcr = signals.get("mc_risk") or {}
+
+    stack = str(trend.get("stack") or "Unknown")
+    golden = bool(trend.get("golden_cross"))
+    death = bool(trend.get("death_cross"))
+    adx_val = float(adx.get("adx") or 0)
+    plus_di = float(adx.get("plus_di") or 0)
+    minus_di = float(adx.get("minus_di") or 0)
+    macd_cross = str(classic.get("macd_cross") or "Neutral")
+
+    trend_bull = (
+        stack == "Bullish"
+        or golden
+        or (adx_val >= 20 and plus_di > minus_di and stack != "Bearish")
+        or macd_cross in ("Bullish", "BullishCross")
+    ) and stack != "Bearish" and not death and macd_cross not in ("Bearish", "BearishCross")
+
+    # Softer bull: stack bullish alone is enough even if MACD mixed
+    trend_bull_soft = stack == "Bullish" or golden
+    trend_bear = (
+        stack == "Bearish"
+        or death
+        or (adx_val >= 20 and minus_di > plus_di)
+        or macd_cross in ("Bearish", "BearishCross")
+    )
+
+    fb_score = float(finbert.get("sentiment_score") or 50.0)
+    fb_label = str(finbert.get("overall_sentiment") or "Neutral")
+    news_bull = fb_score >= 58.0 or _dir_bull(fb_label)
+    news_bear = fb_score <= 42.0 or _dir_bear(fb_label)
+    # Neutral stub when FinBERT disabled (exactly 50) — not a signal
+    news_active = abs(fb_score - 50.0) > 0.5 or (
+        fb_label not in ("Neutral", "Disabled", "N/A", "") and "disable" not in fb_label.lower()
+    )
+
+    var95 = float(mcr.get("var_95") or 0)
+
+    return {
+        "consensus": consensus,
+        "consensus_bull": _dir_bull(consensus),
+        "consensus_bear": _dir_bear(consensus),
+        "trend_bull": trend_bull or trend_bull_soft,
+        "trend_bull_strong": trend_bull and trend_bull_soft,
+        "trend_bear": trend_bear,
+        "stack": stack,
+        "macd_cross": macd_cross,
+        "adx": adx_val,
+        "news_bull": news_bull and news_active,
+        "news_bear": news_bear and news_active,
+        "news_active": news_active,
+        "finbert_score": fb_score,
+        "regime": regime,
+        "regime_bear": str(regime) == "Bear",
+        "var95": var95,
+        "high_var": var95 > 30,
+        "elevated_var": var95 > 20,
+    }
+
+
+def choose_entry(
+    overall: float,
+    q_conv: str,
+    lev: Dict[str, Any],
+) -> Tuple[Action, float, str]:
+    """
+    Multi-path entry. Returns (action, risk_pct, rationale) before hard risk filters.
+    """
+    conv = str(q_conv or "Medium")
+    # Path A: classic high-quality
+    if overall >= 70 and lev["consensus_bull"] and conv in ("High", "Medium"):
+        risk = 0.015 if conv == "High" else 0.01
+        return "long", risk, f"Score {overall} + Bullish consensus + {conv} conviction"
+    if overall >= 60 and conv == "High" and not lev["consensus_bear"]:
+        return "long", 0.01, f"Score {overall} + High conviction (no bearish consensus)"
+
+    # Path B: trend leverage (SMA/ADX/MACD) — participates in strong up trends
+    if (
+        overall >= 52
+        and lev["trend_bull"]
+        and not lev["consensus_bear"]
+        and conv in ("High", "Medium")
+        and not lev["regime_bear"]
+    ):
+        risk = 0.01 if conv == "High" or lev["trend_bull_strong"] else 0.007
+        return (
+            "long",
+            risk,
+            f"Score {overall} + bullish trend (stack={lev['stack']}) + {conv} conv",
+        )
+
+    # Path C: multi-horizon consensus leverage (when forecasts present)
+    if (
+        overall >= 54
+        and lev["consensus_bull"]
+        and conv in ("High", "Medium")
+        and not lev["trend_bear"]
+        and not lev["regime_bear"]
+    ):
+        return (
+            "long",
+            0.008,
+            f"Score {overall} + Bullish multi-horizon + {conv} conv",
+        )
+
+    # Path D: FinBERT/news constructive (only when news path is active)
+    if (
+        overall >= 53
+        and lev["news_bull"]
+        and not lev["consensus_bear"]
+        and not lev["trend_bear"]
+        and conv in ("High", "Medium")
+        and not lev["regime_bear"]
+    ):
+        return (
+            "long",
+            0.007,
+            f"Score {overall} + bullish FinBERT ({lev['finbert_score']}) + {conv} conv",
+        )
+
+    # Path E: strong trend alone with non-Low conviction and mid score
+    if (
+        overall >= 50
+        and lev["trend_bull_strong"]
+        and conv != "Low"
+        and not lev["consensus_bear"]
+        and not lev["regime_bear"]
+        and not lev["news_bear"]
+    ):
+        return (
+            "long",
+            0.006,
+            f"Score {overall} + strong bullish SMA stack + {conv} conv",
+        )
+
+    return (
+        "flat",
+        0.0,
+        f"Score {overall}, {lev['consensus']}, {conv}, trend={lev['stack']} → flat",
+    )
 
 
 def default_policy(
@@ -42,24 +209,23 @@ def default_policy(
     atr_pct: float = 0.0,
     mc_risk: Optional[Dict[str, Any]] = None,
     profile: str = "Balanced",
-    relaxed: bool = False,  # deprecated / ignored — strict policy only
+    relaxed: bool = False,
     memory: Optional[Dict[str, Any]] = None,
 ) -> TradeSignal:
     """
-    Strict decision policy for backtests / paper trading.
-
-    Uses overall score, multi-horizon consensus, quant conviction, then applies
-    hard risk filters (VaR, regime, trend structure) and optional decision memory
-    (stop cooldown, loss-streak size cuts). Memory must be walk-forward-safe.
+    Multi-signal decision policy: score + conviction + trend + consensus + news,
+    then hard VaR/Bear filters and memory cooldowns.
     """
-    # `relaxed` is ignored (demo mode removed)
-    overall = scores.get("overall", 50.0)
-    signals = scores.get("signals", {})
-    multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h", {}) or {}
-    consensus = multi.get("consensus_direction", "Neutral") if isinstance(multi, dict) else "Neutral"
-    consensus_l = str(consensus).lower()
+    del relaxed
+    overall = float(scores.get("overall", 50.0))
+    signals = scores.get("signals", {}) or {}
+    if mc_risk and isinstance(mc_risk, dict):
+        # Prefer explicit mc_risk arg if signals lack it
+        if not signals.get("mc_risk"):
+            signals = {**signals, "mc_risk": mc_risk}
 
-    # Conviction from quant (preferred); soft-adjust from score bands
+    lev = extract_leverage_flags(signals, quant_output)
+
     q_conv = "Medium"
     q_raw = None
     if quant_output and isinstance(quant_output, dict):
@@ -68,53 +234,37 @@ def default_policy(
         q_raw = qs.get("raw_conviction_score") if isinstance(qs, dict) else None
     if overall >= 75:
         q_conv = "High"
-    elif overall < 45:
+    elif overall < 42:
+        # Slightly less aggressive Low clamp so mid-40s can still use trend paths with Medium quant
         q_conv = "Low"
 
-    # Entry rules (strict)
-    if overall >= 70 and "bull" in consensus_l and q_conv in ("High", "Medium"):
-        action: Action = "long"
-        risk = 0.015 if q_conv == "High" else 0.01
-        rationale = f"Score {overall} + Bullish consensus + {q_conv} conviction"
-    elif overall >= 60 and q_conv == "High" and "bear" not in consensus_l:
-        action = "long"
-        risk = 0.01
-        rationale = f"Score {overall} + High conviction (no bearish consensus)"
-    else:
-        action = "flat"
-        risk = 0.0
-        rationale = f"Score {overall}, {consensus}, {q_conv} → flat"
+    action, risk, rationale = choose_entry(overall, q_conv, lev)
 
     # ── Hard risk filters ───────────────────────────────────────────────────
-    mcr = signals.get("mc_risk", mc_risk or {}) or {}
-    if not isinstance(mcr, dict):
-        mcr = {}
-    var95 = float(mcr.get("var_95") or 0)
-    regime = (signals.get("regime") or {}).get("regime", "Neutral")
-    classic = signals.get("classic") or {}
-    adx = signals.get("adx") or {}
-    trend = signals.get("trend") or {}
+    var95 = lev["var95"]
+    regime = lev["regime"]
 
     if action == "long":
-        if var95 > 30 or regime == "Bear":
+        if lev["high_var"] or lev["regime_bear"]:
             action = "flat"
             risk = 0.0
             rationale = f"{rationale} | risk filter: VaR={var95}% regime={regime} → flat"
-        elif var95 > 20:
+        elif lev["consensus_bear"] and overall < 68:
+            # Soft paths cannot fight bearish ensemble; classic high score still blocked unless very strong
+            action = "flat"
+            risk = 0.0
+            rationale = f"{rationale} | risk filter: Bearish multi-horizon consensus → flat"
+        elif lev["elevated_var"]:
             risk = max(0.002, risk * 0.5)
             rationale = f"{rationale} | size cut: elevated VaR {var95}%"
-        macd_cross = str(classic.get("macd_cross", ""))
-        stack = str(trend.get("stack", ""))
-        adx_val = float(adx.get("adx") or 0)
-        if overall < 65 and (
-            macd_cross in ("Bearish", "BearishCross")
-            or stack == "Bearish"
-            or (adx_val >= 25 and float(adx.get("minus_di") or 0) > float(adx.get("plus_di") or 0))
-        ):
+        if action == "long" and lev["trend_bear"] and overall < 65:
             risk = max(0.002, risk * 0.5)
             rationale = f"{rationale} | trend caution: MACD/ADX/SMA stack"
+        if action == "long" and lev["news_bear"]:
+            risk = max(0.002, risk * 0.7)
+            rationale = f"{rationale} | size cut: bearish FinBERT"
 
-    # High model disagreement → smaller size
+    multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h") or {}
     if action == "long" and isinstance(multi, dict):
         h5 = (multi.get("horizons") or {}).get("5d") or {}
         disagree = h5.get("model_disagreement")
@@ -125,7 +275,6 @@ def default_policy(
         except (TypeError, ValueError):
             pass
 
-    # ── Decision memory (Abzu-style episodic; code-enforced, not prose) ─────
     mem = memory if isinstance(memory, dict) else {}
     if mem:
         if action == "long" and mem.get("block_new_long"):
@@ -140,20 +289,22 @@ def default_policy(
                 flags = ",".join(mem.get("flags") or []) or f"mult={mult}"
                 rationale = f"{rationale} | memory size cut: {flags}"
 
-    # Stop hint (ATR-based when available)
+    mcr = signals.get("mc_risk", mc_risk or {}) or {}
+    if not isinstance(mcr, dict):
+        mcr = {}
     stop = None
-    if isinstance(mcr, dict) and mcr.get("stop_price"):
+    if mcr.get("stop_price"):
         stop = mcr.get("stop_price")
     elif atr_pct > 0 and current_price > 0:
         stop = current_price * (1 - max(0.05, atr_pct / 100 * 1.5))
     elif current_price > 0:
-        stop = current_price * 0.92  # default ~8% stop
+        stop = current_price * 0.92
 
     horizon = None
     if isinstance(multi, dict) and "horizons" in multi:
         for h in ["5d", "10d", "15d", "20d", "50d"]:
             hd = multi["horizons"].get(h, {})
-            if isinstance(hd, dict) and "bull" in str(hd.get("direction", "")).lower():
+            if isinstance(hd, dict) and _dir_bull(hd.get("direction")):
                 horizon = int(str(h).replace("d", ""))
                 break
 
@@ -180,10 +331,7 @@ def position_size_shares(
     min_shares: int = 0,
     max_notional_pct: float = 0.95,
 ) -> int:
-    """Risk-based size: shares ≈ (equity * risk_pct) / stop_distance, capped by cash.
-
-    Never returns a size whose notional exceeds max_notional_pct * equity.
-    """
+    """Risk-based size capped by cash notional."""
     if equity <= 0 or risk_pct <= 0 or price <= 0:
         return 0
     if stop_price is not None and stop_price > 0 and stop_price < price:

@@ -259,13 +259,15 @@ class Backtester:
                     }
                     try:
                         from score import calculate_pillars
+                        # Fast mode skips multi-horizon training but keeps FinBERT/news
+                        # so sentiment leverage remains available without full ensemble cost.
                         scores = calculate_pillars(
                             replay_data,
                             self.profile,
                             compute_dynamic_weights=not self.fast_mode,
                             hist=hist_slice,
                             asof=day_str,
-                            use_gpu_signals=not self.fast_mode,
+                            use_gpu_signals=True,
                             use_forecasts=self.use_forecasts and not self.fast_mode,
                         )
                     except Exception as e:
