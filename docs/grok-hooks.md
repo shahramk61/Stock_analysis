@@ -1,39 +1,41 @@
-# Grok Build hooks (future automation)
+# Grok Build automation (subscription path)
 
-This project’s **decision backend is Grok Build**. Hooks are **opt-in** and not installed by default.
+**Decision backend = Grok Build (your subscription).**  
+No `XAI_API_KEY` is required for normal use.
 
 ## Today
 
 | Trigger | How |
 |---------|-----|
-| Manual | `/decide-stock TICKER` in Grok Build |
-| Facts only | `python scripts/prepare_decision_handoff.py TICKER` |
-| API rephrase | `XAI_API_KEY` + `--grok-debate` on handoff (optional) |
+| Manual decision | `/decide-stock TICKER` in this Grok Build chat |
+| Facts only (no LLM) | `python scripts/prepare_decision_handoff.py TICKER --fast` |
+| Agents | `.grok/agents/stock-*.md` (run as Grok Build agents/subagents) |
 
-## Later (hook design)
+## Do not use for the primary path
 
-Intended automation (do not enable globally without user consent):
+| Avoid | Why |
+|-------|-----|
+| `XAI_API_KEY` / `scripts/agents/llm/grok_client.py` | Separate HTTP API billing; not your Grok Build subscription |
+| `--grok-debate` on handoff | Optional API rephrase only; skip it |
 
-1. **Scheduled watchlist** — cron or Grok scheduled task runs handoff + decide for a list of tickers.
-2. **SessionStart (opt-in)** — only if a project flag file exists (e.g. `.grok/auto-decide.watchlist`).
-3. **Post-backtest** — after `scripts/backtest.py --export`, offer `/decide-stock` using last blotter + memory.
+The `grok_client.py` module remains only for rare offline/script experiments. Prefer in-session Grok for all debate and decisions.
 
-### Stub entrypoint
+## Later (opt-in automation)
+
+Still **inside Grok Build**, not the public API:
+
+1. **Scheduled task / workflow** in Grok that runs prepare + decide for a watchlist  
+2. **Project-local hook** only if the user creates an opt-in flag (never default-on)  
+3. **Post-backtest** prompt: offer `/decide-stock` using journal memory  
+
+### Stub (facts only)
 
 ```bash
-# Does not place trades. Prints / runs prepare path.
 ./scripts/hooks/run_decide_stock.sh TSLA
+# → prepares handoff, then tells you to run /decide-stock in Grok Build
 ```
-
-### Env
-
-| Var | Purpose |
-|-----|---------|
-| `XAI_API_KEY` | Optional scripted Grok API (not required for Grok Build UI agents) |
-| `XAI_MODEL` | Default `grok-4.5` |
-| `XAI_BASE_URL` | Default `https://api.x.ai/v1` |
 
 ## Safety
 
-- Hooks must **never** send live broker orders without a separate, explicit execution module.
-- Decision artifacts stay under `decisions/` and `journal/` with integrity rules intact.
+- No live broker orders without a separate execution module.  
+- Artifacts under `decisions/` and `journal/` only.  

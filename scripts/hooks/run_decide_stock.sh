@@ -11,7 +11,7 @@ if [[ -z "$TICKER" ]]; then
   exit 1
 fi
 echo "[hook-stub] Preparing handoff for $TICKER (profile=$PROFILE)"
-echo "[hook-stub] Decision backend: Grok Build (/decide-stock $TICKER)"
+echo "[hook-stub] Uses Grok Build subscription for decisions — no XAI_API_KEY"
 python3 scripts/prepare_decision_handoff.py "$TICKER" --profile "$PROFILE" --fast
-echo "[hook-stub] Handoff ready under decisions/handoff_${TICKER^^}.json (or path printed above)"
-echo "[hook-stub] Next: run /decide-stock $TICKER in Grok Build (not automated yet)"
+echo "[hook-stub] Handoff ready (see path printed above)"
+echo "[hook-stub] Next: /decide-stock $TICKER in this Grok Build session"

@@ -1,13 +1,14 @@
 """
-xAI / Grok LLM client (OpenAI-compatible API).
+Optional external xAI HTTP client (NOT the primary path).
 
-Env:
-  XAI_API_KEY   — required for API calls
-  XAI_BASE_URL  — default https://api.x.ai/v1
-  XAI_MODEL     — default grok-4.5
+Primary decisions use the **Grok Build subscription** (in-session agents /
+/decide-stock). Do not require users to set XAI_API_KEY for normal operation.
 
-Used for optional quant debate rephrase and scripted paths.
-Primary multi-agent decisions run in Grok Build (not this client).
+This module exists only for rare offline/script experiments that call
+api.x.ai directly. Prefer Grok Build for all Bull/Bear/Trader work.
+
+Env (external API only):
+  XAI_API_KEY, XAI_BASE_URL (default https://api.x.ai/v1), XAI_MODEL (default grok-4.5)
 """
 
 from __future__ import annotations

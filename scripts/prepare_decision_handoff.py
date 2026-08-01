@@ -38,8 +38,10 @@ def main():
     p.add_argument("--output", default=None, help="Output JSON path")
     p.add_argument("--fast", action="store_true", help="Skip GPU/forecast signals")
     p.add_argument("--no-forecasts", action="store_true")
-    p.add_argument("--debate", action="store_true", help="Include quant debate template")
-    p.add_argument("--grok-debate", action="store_true", help="Rephrase debate via Grok API if XAI_API_KEY set")
+    p.add_argument("--debate", action="store_true",
+                   help="Include quant debate template text (local facts only; rephrase in Grok Build)")
+    p.add_argument("--grok-debate", action="store_true",
+                   help="DEPRECATED: external XAI_API_KEY path. Prefer Grok Build /decide-stock (subscription).")
     args = p.parse_args()
 
     ticker = args.ticker.upper()
@@ -48,6 +50,7 @@ def main():
     out_path = Path(args.output) if args.output else out_dir / f"handoff_{ticker}.json"
 
     print(f"Preparing handoff for {ticker} (profile={args.profile})...")
+    print("Decision backend: Grok Build subscription (no API key). This script only freezes pipeline facts.")
 
     data = fetch_stock_data(ticker)
     data["dcf"] = calculate_dcf(data)
@@ -61,16 +64,21 @@ def main():
     mc = run_monte_carlo(data["current_price"], vol, scores["overall"], days=252)
     signals_path = generate_json_report(data, scores, mc, args.profile)
 
+    # Primary path: no external LLM. Debate phrasing happens in Grok Build.
     llm = None
     if args.grok_debate:
+        print(
+            "Note: --grok-debate uses XAI_API_KEY (separate from Grok Build). "
+            "For your subscription, omit this flag and run /decide-stock in Grok Build."
+        )
         try:
             from agents.llm.grok_client import get_grok_llm
             llm = get_grok_llm(require_key=True)
-            print(f"Grok LLM: {llm.model}")
+            print(f"External Grok API model: {llm.model}")
         except Exception as e:
-            print(f"Warning: Grok LLM unavailable ({e}); template debate only")
+            print(f"Warning: external Grok API unavailable ({e}); template debate only")
 
-    quant_node = create_quantitative_analyst(llm=llm, debate_mode=args.debate or bool(llm))
+    quant_node = create_quantitative_analyst(llm=llm, debate_mode=args.debate or bool(llm) or True)
     quant = quant_node({
         "ticker": ticker,
         "company_of_interest": ticker,
