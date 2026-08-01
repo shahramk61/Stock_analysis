@@ -84,4 +84,13 @@ Schema version and validation flags: `schema_version`, `schema_valid`, `schema_e
 | Backtest | `scripts/backtest.py` |
 | Dashboard | `streamlit run scripts/dashboard.py` |
 
-See root `README.md` and `ROADMAP.md` for architecture and milestone status.
+## Grok decision path
+
+For Grok-authored decisions (not just analysis), use skill **stock-decision** / `/decide-stock`:
+
+```bash
+python scripts/prepare_decision_handoff.py TICKER --fast
+# then /decide-stock TICKER in Grok Build
+```
+
+See root `README.md`, `docs/grok-hooks.md`, and `ROADMAP.md`.

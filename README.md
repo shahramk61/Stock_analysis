@@ -31,7 +31,26 @@ cd Stock_analysis
 python -m pip install -r requirements.txt
 ```
 
-Open the repo in Grok Build (or any agent) from this directory — project skills under `.grok/` load automatically.
+Open the repo in **Grok Build** from this directory — project skills and agents under `.grok/` load automatically.
+
+### Agent backend = Grok Build
+
+| Layer | Backend |
+|-------|---------|
+| Scores, signals, backtest, journal | Local Python (`scripts/`) |
+| Multi-agent **decisions** (Bull/Bear/Manager/Trader) | **Grok Build** (`grok-4.5`) |
+| Optional quant debate rephrase via API | `XAI_API_KEY` + `scripts/agents/llm/grok_client.py` |
+
+```bash
+# 1) Freeze pipeline facts
+python scripts/prepare_decision_handoff.py AAPL --profile Balanced --fast
+
+# 2) In Grok Build
+/decide-stock AAPL
+```
+
+Optional env for scripted Grok API (not required for in-UI agents): `XAI_API_KEY`, `XAI_MODEL=grok-4.5`.  
+Future automation: see [docs/grok-hooks.md](docs/grok-hooks.md).
 
 ---
 
