@@ -139,7 +139,7 @@ def main():
 
     print(f"Handoff written: {out_path}")
     print(f"Overall score: {scores.get('overall')} | Policy hint: {sig.action} ({sig.conviction})")
-    print("Next: open Grok Build and run /decide-stock", ticker, "using this handoff.")
+    print(f"Next (Grok Build subscription): /decide-stock {ticker}")
     return 0
 
 
