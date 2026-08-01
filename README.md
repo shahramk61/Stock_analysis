@@ -50,12 +50,14 @@ streamlit run scripts/dashboard.py
 # Quantitative Analyst smoke test
 python test_quant_analyst.py
 
-# Backtest (fast mode recommended)
-python scripts/backtest.py AAPL --start 2024-01-01 --fast --export
+# Backtest (fast mode recommended) — next-open fill, daily stops, flat exits
+python scripts/backtest.py AAPL --start 2024-01-01 --end 2024-12-31 --fast --export --validate
 
-# Demo / no neural forecasts / relaxed policy for simulator visibility
-python scripts/backtest.py AAPL --start 2024-06-01 --fast --no-forecasts --relaxed --debate --export
+# No neural forecasts (regime / risk / technicals only)
+python scripts/backtest.py AAPL --start 2024-06-01 --fast --no-forecasts --export
 ```
+
+Backtest execution model: signals at decision **close** → fill next **open**; stop checked daily on **low**; **flat** exits next open; size cash-capped; BH on the test window only.
 
 Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).  
 Forecasts default to horizons **5d / 20d / 50d** for speed; full set available via code (`full_horizons=True`).

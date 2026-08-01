@@ -71,10 +71,12 @@
 - [x] `calculate_pillars` + Quant Analyst node made replayable (pass-through `hist`/`asof`, `use_gpu_signals` for fast mode, `debate_mode` for conversation stub)
 - [x] Real policy on agent outputs: `default_policy` consumes overall score + multi-horizon consensus + `quantitative_conviction` + risk signals → `TradeSignal` (action, risk size, stop, rationale)
 - [x] Simulator + metrics: risk-based position entry, basic stops/exits, equity curve, drawdown, vs buy-and-hold benchmark, trade logging
-- [x] CLI (`scripts/backtest.py`): `--fast`, `--debate`, `--export`, `--validate`, `--relaxed`, `--no-forecasts`
-- [x] Hard risk filters (high VaR / Bear → flat) + ATR/stop-based `position_size_shares`
-- [x] No-lookahead / indicator unit tests (`tests/test_no_lookahead.py`)
+- [x] CLI (`scripts/backtest.py`): `--fast`, `--debate`, `--export`, `--validate`, `--no-forecasts`
+- [x] Hard risk filters (high VaR / Bear → flat) + cash-capped `position_size_shares`
+- [x] Correct execution: next-open fill, daily stop-on-low, flat exits, BH on window only, no live `info` leak
+- [x] No-lookahead / engine unit tests (`tests/test_no_lookahead.py`, `tests/test_backtest_engine.py`)
 - [~] Longer 6–12 month validation runs (use `--fast --export`; document results as needed)
+- [~] Residual look-ahead: Altman/Piotroski/quality still call live yfinance (need PIT fundamentals later)
 
 This milestone directly supports the goal of trusting the agent before wiring it to a live broker/agentic API (e.g. Robinhood).
 

@@ -98,6 +98,9 @@ def test_position_size_shares():
     shares = position_size_shares(equity=100_000, risk_pct=0.01, price=100.0, stop_price=95.0)
     # risk $1000 / $5 stop = 200 shares
     assert shares == 200
+    # cash cap: tight stop must not explode notional
+    shares2 = position_size_shares(10_000, 0.01, 100.0, stop_price=99.5, max_notional_pct=0.95)
+    assert shares2 * 100 <= 10_000 * 0.95 + 1e-6
 
 
 def test_amihud_scalar():

@@ -10,7 +10,8 @@ This file captures the audit of existing decision/risk logic (from plan Phase 0)
 - **Dashboard**: similar thresholds; Strong Buy 75+, Buy 60+, Hold/Watch 50+.
 - Multi-horizon consensus/trend + quant conviction drive `default_policy` (backtest), not the static rec string alone.
 - **Risk filters (strict):** VaR>30 or Bear regime → flat; elevated VaR / bearish MACD+ADX/SMA → size cut.
-- **`--relaxed`:** demo-only lower bar so the simulator produces trades for visibility.
+- **Execution model (corrected):** signal at decision close → **next open fill**; **daily stop on low** (gap → open); **flat exits** next open; size **cash-capped** (≤95% notional); equity marked daily; BH on test window only; live `info` not used in replay.
+- Demo / `--relaxed` paths removed.
 
 ### Role of Multi-Horizon Forecasts
 - Rich data in `multi_horizon_forecasts` (or `multi_h`): per-horizon median/avg/static-wgt/dynamic-wgt returns, direction, model_disagreement, num_models, consensus_direction, trend_signal, daily paths + dates + per-model breakdown for 5/10/15/20/50d.
