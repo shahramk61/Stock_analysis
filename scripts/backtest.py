@@ -38,14 +38,22 @@ def main():
     parser.add_argument("--debate", action="store_true", help="Include quant debate commentary in decisions")
     parser.add_argument("--export", action="store_true", help="Write backtest_decisions_<TICKER>.json")
     parser.add_argument("--validate", action="store_true", help="Print validation notes + export")
+    parser.add_argument("--memory", dest="memory", action="store_true", default=True,
+                        help="Enable decision memory (stop cooldown / loss streak) — default on")
+    parser.add_argument("--no-memory", dest="memory", action="store_false",
+                        help="Disable decision memory (stateless policy)")
+    parser.add_argument("--journal", action="store_true",
+                        help="Persist episodic run under journal/runs/ (Abzu-style)")
     args = parser.parse_args()
 
     print(
         f"Running backtest {args.ticker} {args.start} → {args.end or 'today'} | "
         f"capital=${args.capital:,.0f} risk={args.risk*100:.1f}% rebalance={args.rebalance_days}d | "
-        f"fast={args.fast} forecasts={not args.no_forecasts and not args.fast}"
+        f"fast={args.fast} forecasts={not args.no_forecasts and not args.fast} memory={args.memory}"
     )
     print("Execution: next-open fill · daily stop-on-low · flat exits · cash-capped size · BH on window only")
+    if args.memory:
+        print("Memory: stop cooldown + loss-streak size cuts (walk-forward safe; see journal/README.md)")
 
     x_pre = None
     if args.debate:
@@ -70,6 +78,7 @@ def main():
         debate_mode=args.debate,
         x_pre_fetched=x_pre,
         use_forecasts=not args.no_forecasts,
+        use_memory=args.memory,
     )
     result = bt.run()
 
@@ -113,8 +122,16 @@ def main():
         flats = sum(1 for d in decs if d.get("action") == "flat")
         scores = [d["overall_score"] for d in decs if d.get("overall_score") is not None]
         avg = sum(scores) / len(scores) if scores else 0
+        mem_blocks = sum(1 for d in decs if "memory block" in str(d.get("rationale") or ""))
         print(f"\n  Decisions: {len(decs)}  long={longs} flat={flats}  avg_score={avg:.1f}")
+        if mem_blocks:
+            print(f"  Memory blocks (cooldown): {mem_blocks}")
         print(f"  Sample rationale: {(decs[0].get('rationale') or '')[:140]}")
+        # last decision with memory flags
+        for d in reversed(decs):
+            if d.get("memory_flags"):
+                print(f"  Example memory flags: {d.get('memory_flags')} (on {d.get('date')})")
+                break
 
     if args.validate:
         print("\n--- Validation notes ---")
@@ -127,8 +144,9 @@ def main():
         print("• Fundamentals: yfinance `info` NOT used in replay (no live PE/ROE leak).")
         print("  Note: some signal helpers still call yf.Ticker for altman/piotroski/etc. — residual look-ahead risk.")
         print(f"• Metrics total_return uses initial capital ${args.capital:,.0f}.")
+        print("• Memory: only decisions/trades with dates ≤ asof; stop cooldown + loss streak (journal/).")
 
-    if args.export or args.validate:
+    if args.export or args.validate or args.journal:
         out_path = f"backtest_decisions_{args.ticker}.json"
         payload = {
             "meta": {
@@ -142,6 +160,7 @@ def main():
                 "fast": args.fast,
                 "forecasts": not args.no_forecasts and not args.fast,
                 "debate": args.debate,
+                "memory": args.memory,
                 "execution_model": result.metrics.get("execution_model"),
             },
             "summary": {
@@ -152,6 +171,7 @@ def main():
             },
             "decisions": decs,
             "trades": result.trades,
+            "memory": getattr(result, "memory_export", None),
             "equity_curve": [
                 {
                     "date": str(idx.date()) if hasattr(idx, "date") else str(idx),
@@ -165,6 +185,22 @@ def main():
         with open(out_path, "w") as f:
             json.dump(payload, f, indent=2, default=str)
         print(f"\nExported: {out_path}")
+
+    if args.journal and getattr(result, "memory_export", None):
+        from backtest.memory import DecisionMemory, MemoryConfig
+        # Rebuild memory object for save helper
+        mem = DecisionMemory(ticker=args.ticker, config=MemoryConfig(enabled=True))
+        mem.decisions = list(result.decisions or [])
+        mem.trades = list(result.trades or [])
+        mem.snapshots = list((result.memory_export or {}).get("snapshots") or [])
+        repo_root = os.path.abspath(os.path.join(SCRIPTS_DIR, ".."))
+        jpath = mem.save_journal_run(
+            repo_root,
+            start=args.start,
+            end=args.end or str(date.today()),
+            metrics=result.metrics,
+        )
+        print(f"Journal run saved: {jpath}")
 
 
 if __name__ == "__main__":

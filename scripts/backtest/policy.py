@@ -43,12 +43,14 @@ def default_policy(
     mc_risk: Optional[Dict[str, Any]] = None,
     profile: str = "Balanced",
     relaxed: bool = False,  # deprecated / ignored — strict policy only
+    memory: Optional[Dict[str, Any]] = None,
 ) -> TradeSignal:
     """
     Strict decision policy for backtests / paper trading.
 
     Uses overall score, multi-horizon consensus, quant conviction, then applies
-    hard risk filters (VaR, regime, trend structure).
+    hard risk filters (VaR, regime, trend structure) and optional decision memory
+    (stop cooldown, loss-streak size cuts). Memory must be walk-forward-safe.
     """
     # `relaxed` is ignored (demo mode removed)
     overall = scores.get("overall", 50.0)
@@ -122,6 +124,21 @@ def default_policy(
                 rationale = f"{rationale} | size cut: model disagreement {disagree}"
         except (TypeError, ValueError):
             pass
+
+    # ── Decision memory (Abzu-style episodic; code-enforced, not prose) ─────
+    mem = memory if isinstance(memory, dict) else {}
+    if mem:
+        if action == "long" and mem.get("block_new_long"):
+            action = "flat"
+            risk = 0.0
+            flags = ",".join(mem.get("flags") or []) or "cooldown"
+            rationale = f"{rationale} | memory block: {flags}"
+        elif action == "long":
+            mult = float(mem.get("risk_multiplier") or 1.0)
+            if mult < 1.0 and risk > 0:
+                risk = max(0.002, risk * mult)
+                flags = ",".join(mem.get("flags") or []) or f"mult={mult}"
+                rationale = f"{rationale} | memory size cut: {flags}"
 
     # Stop hint (ATR-based when available)
     stop = None

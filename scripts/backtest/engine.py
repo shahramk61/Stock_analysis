@@ -29,6 +29,7 @@ from .data import (
 )
 from .metrics import compute_metrics
 from .policy import default_policy, position_size_shares
+from .memory import DecisionMemory, MemoryConfig
 
 
 COMMISSION_PCT = 0.001   # 0.1% round-trip total → half per side
@@ -46,6 +47,7 @@ class BacktestResult:
     metrics: Dict[str, Any]
     final_equity: float
     decisions: List[Dict[str, Any]] = field(default_factory=list)
+    memory_export: Optional[Dict[str, Any]] = None
 
 
 class Backtester:
@@ -63,6 +65,8 @@ class Backtester:
         x_pre_fetched: dict | None = None,
         relaxed: bool = False,  # kept for API compat; ignored (strict execution only)
         use_forecasts: bool = True,
+        use_memory: bool = True,
+        memory_config: Optional[MemoryConfig] = None,
     ):
         self.ticker = ticker.upper()
         self.start = str(start)
@@ -76,6 +80,8 @@ class Backtester:
         self.x_pre_fetched = x_pre_fetched
         self.relaxed = False  # demo mode disabled
         self.use_forecasts = use_forecasts
+        self.use_memory = use_memory
+        self.memory_config = memory_config or MemoryConfig(enabled=use_memory)
         self._data: Optional[Dict[str, Any]] = None
 
     def _prepare_data(self) -> Dict[str, Any]:
@@ -92,6 +98,7 @@ class Backtester:
         fill_date: str,
         trades: List[Dict[str, Any]],
         reason: str,
+        memory: Optional[DecisionMemory] = None,
     ) -> tuple[float, float, float]:
         """Close full long; returns (cash, position=0, entry_price=0)."""
         if position <= 0:
@@ -108,6 +115,14 @@ class Backtester:
                 t["exit_reason"] = reason
                 gross = (fill_price - entry_price) * position
                 t["pnl"] = round(gross - t.get("entry_cost", 0) - exit_cost, 4)
+                if memory is not None:
+                    memory.update_last_trade(
+                        exit_date=t["exit_date"],
+                        exit_price=t["exit_price"],
+                        exit_cost=t["exit_cost"],
+                        exit_reason=t["exit_reason"],
+                        pnl=t["pnl"],
+                    )
         return cash, 0.0, 0.0
 
     def _open_long(
@@ -119,6 +134,7 @@ class Backtester:
         stop: Optional[float],
         sig_meta: Dict[str, Any],
         trades: List[Dict[str, Any]],
+        memory: Optional[DecisionMemory] = None,
     ) -> tuple[float, float, float, Optional[float]]:
         """Open long; returns (cash, position, entry_price, stop)."""
         if shares <= 0 or cash <= 0:
@@ -127,7 +143,6 @@ class Backtester:
         entry_cost = notional * (COMMISSION_PCT / 2 + SLIPPAGE_PCT)
         total = notional + entry_cost
         if total > cash:
-            # Re-size to fit cash
             shares = int(cash / (fill_price * (1 + COMMISSION_PCT / 2 + SLIPPAGE_PCT)))
             if shares <= 0:
                 return cash, 0.0, 0.0, None
@@ -135,7 +150,7 @@ class Backtester:
             entry_cost = notional * (COMMISSION_PCT / 2 + SLIPPAGE_PCT)
             total = notional + entry_cost
         cash -= total
-        trades.append({
+        rec = {
             "entry_date": fill_date,
             "entry_price": round(float(fill_price), 4),
             "shares": int(shares),
@@ -146,7 +161,10 @@ class Backtester:
             "rationale": sig_meta.get("rationale"),
             "decision_date": sig_meta.get("decision_date"),
             "entry_cost": round(entry_cost, 4),
-        })
+        }
+        trades.append(rec)
+        if memory is not None:
+            memory.record_trade(rec)
         return cash, float(shares), float(fill_price), stop
 
     def run(self) -> BacktestResult:
@@ -177,6 +195,10 @@ class Backtester:
         decisions: List[Dict[str, Any]] = []
         equity_records: List[Dict[str, Any]] = []
 
+        mem = DecisionMemory(ticker=self.ticker, config=self.memory_config)
+        if not self.use_memory:
+            mem.config.enabled = False
+
         # Pending order filled next open: {"side": "buy"|"sell", "shares", "stop", "meta"}
         pending: Optional[Dict[str, Any]] = None
 
@@ -192,7 +214,8 @@ class Backtester:
                 side = pending["side"]
                 if side == "sell" and position > 0:
                     cash, position, entry_price = self._close_position(
-                        cash, position, entry_price, o, day_str, trades, pending.get("reason", "signal")
+                        cash, position, entry_price, o, day_str, trades,
+                        pending.get("reason", "signal"), memory=mem,
                     )
                     stop_price = None
                 elif side == "buy" and position == 0:
@@ -204,16 +227,17 @@ class Backtester:
                         pending.get("stop"),
                         pending.get("meta") or {},
                         trades,
+                        memory=mem,
                     )
                 pending = None
 
             # ── 2) Intraday stop check (long): use low; gap-through → open ───
             if position > 0 and stop_price is not None:
                 if lo <= float(stop_price):
-                    # Gap open below stop → fill at open; else fill at stop
                     fill = o if o <= float(stop_price) else float(stop_price)
                     cash, position, entry_price = self._close_position(
-                        cash, position, entry_price, fill, day_str, trades, "stop"
+                        cash, position, entry_price, fill, day_str, trades, "stop",
+                        memory=mem,
                     )
                     stop_price = None
 
@@ -229,7 +253,7 @@ class Backtester:
                     hist_slice = snap["history"]
                     replay_data = {
                         "ticker": self.ticker,
-                        "info": {},  # no live fundamentals leak
+                        "info": {},
                         "history": hist_slice,
                         "current_price": c,
                     }
@@ -247,6 +271,22 @@ class Backtester:
                     except Exception as e:
                         scores = {"overall": 50.0, "signals": {}, "error": str(e)[:120]}
 
+                    # Memory snapshot BEFORE this decision (past-only)
+                    mem_snap = None
+                    mem_policy = None
+                    mem_text = ""
+                    if self.use_memory and mem.config.enabled:
+                        mem_snap = mem.snapshot_asof(
+                            day_str,
+                            position=position,
+                            entry_price=entry_price,
+                            stop_price=stop_price,
+                            current_price=c,
+                        )
+                        mem_policy = mem.apply_to_policy_inputs(mem_snap)
+                        mem_text = mem_policy.get("summary") or ""
+                        mem.store_snapshot(mem_snap)
+
                     quant_out: Dict[str, Any] = {}
                     try:
                         from agents.quantitative_analyst.quantitative_analyst import (
@@ -261,6 +301,8 @@ class Backtester:
                             "use_forecasts": self.use_forecasts and not self.fast_mode,
                             "hist": hist_slice,
                             "asof": day_str,
+                            "decision_memory": mem_text,
+                            "decision_memory_struct": mem_snap,
                         })
                     except Exception as e:
                         quant_out = {"quantitative_conviction": "Medium", "error": str(e)[:80]}
@@ -276,6 +318,7 @@ class Backtester:
                         mc_risk=(scores.get("signals") or {}).get("mc_risk"),
                         profile=self.profile,
                         relaxed=False,
+                        memory=mem_policy,
                     )
 
                     decision_note = {
@@ -288,14 +331,16 @@ class Backtester:
                         "suggested_risk_pct": sig.suggested_risk_pct,
                         "stop_price": sig.stop_price,
                         "debate_note": quant_out.get("quantitative_debate_commentary") if self.debate_mode else None,
+                        "memory_flags": (mem_snap or {}).get("flags") if mem_snap else [],
+                        "memory_risk_multiplier": (mem_snap or {}).get("risk_multiplier") if mem_snap else 1.0,
                     }
                     decisions.append(decision_note)
+                    mem.record_decision(decision_note)
 
-                    # Translate policy → pending next-open order
                     if sig.action == "flat" and position > 0:
                         pending = {"side": "sell", "reason": "flat", "meta": decision_note}
                     elif sig.action == "long" and position == 0:
-                        equity_now = cash  # all cash when flat
+                        equity_now = cash
                         risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
                         shares = position_size_shares(
                             equity=equity_now,
@@ -317,11 +362,8 @@ class Backtester:
                                 },
                             }
                     elif sig.action == "long" and position > 0 and sig.stop_price:
-                        # Update stop if policy tightens (trailing not implemented)
                         if stop_price is None or float(sig.stop_price) > float(stop_price):
-                            # Only raise stop for long (never loosen)
                             stop_price = float(sig.stop_price)
-                    # short not supported
 
             # ── 4) Mark equity at close ──────────────────────────────────────
             mtm = cash + position * c
@@ -337,6 +379,7 @@ class Backtester:
                 "conviction": (decision_note or {}).get("conviction"),
                 "rationale": (decision_note or {}).get("rationale"),
                 "debate_note": (decision_note or {}).get("debate_note"),
+                "memory_flags": (decision_note or {}).get("memory_flags"),
             })
 
         # Close any open position at final close (blotter + cash consistency)
@@ -345,14 +388,13 @@ class Backtester:
             last_str = str(pd.Timestamp(last).date())
             last_px = float(close.loc[last]) if last in close.index else float(close.iloc[-1])
             cash, position, entry_price = self._close_position(
-                cash, position, entry_price, last_px, last_str, trades, "end_of_backtest"
+                cash, position, entry_price, last_px, last_str, trades, "end_of_backtest",
+                memory=mem,
             )
-            # Refresh last equity mark after forced close
             if equity_records:
                 equity_records[-1]["equity"] = cash
                 equity_records[-1]["cash"] = cash
                 equity_records[-1]["position"] = 0
-
         eq_df = pd.DataFrame(equity_records)
         if not eq_df.empty:
             eq_df["date"] = pd.to_datetime(eq_df["date"])
@@ -391,8 +433,10 @@ class Backtester:
         metrics["num_decisions"] = len(decisions)
         metrics["execution_model"] = "next_open_fill + daily_stop_on_low"
         metrics["fundamentals_pit"] = False
+        metrics["memory_enabled"] = bool(self.use_memory and mem.config.enabled)
 
         final_eq = float(eq_df["equity"].iloc[-1]) if not eq_df.empty else self.initial_capital
+        memory_export = mem.to_export() if self.use_memory else None
 
         return BacktestResult(
             ticker=self.ticker,
@@ -403,4 +447,5 @@ class Backtester:
             metrics=metrics,
             final_equity=final_eq,
             decisions=decisions,
+            memory_export=memory_export,
         )

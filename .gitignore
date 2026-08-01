@@ -19,6 +19,9 @@ signals_*.json
 .cache/
 x_sentiment_*.json
 
+# Episodic journal runs (keep rules/ docs; ignore bulky run dumps)
+journal/runs/*.json
+
 # Backtest artifacts (decisions, simulated trade logs)
 backtest_decisions_*.json
 backtest_trade_log*.csv

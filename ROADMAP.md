@@ -77,6 +77,7 @@
 - [x] No-lookahead / engine unit tests (`tests/test_no_lookahead.py`, `tests/test_backtest_engine.py`)
 - [~] Longer 6–12 month validation runs (use `--fast --export`; document results as needed)
 - [~] Residual look-ahead: Altman/Piotroski/quality still call live yfinance (need PIT fundamentals later)
+- [x] Decision journal + walk-forward memory (stop cooldown, loss streak, Abzu-style gates under `journal/`)
 
 This milestone directly supports the goal of trusting the agent before wiring it to a live broker/agentic API (e.g. Robinhood).
 

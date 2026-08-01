@@ -174,8 +174,18 @@ After enough rounds, Portfolio Manager issues the final multi-tier decision.
 - multi-horizon `consensus_direction`  
 - `risk.var_95`, `regime.regime`  
 - classic / ADX / trend when present  
+- **`memory`** (walk-forward): `block_new_long`, `risk_multiplier`, `flags` from `DecisionMemory`
 
 Prompts that invent conviction or understate risk should fail unit tests when compared to these fields.
+
+## Decision journal (Abzu-style)
+
+See `journal/README.md`.
+
+- Episodic runs: `journal/runs/` (not doctrine)
+- Current rules: `journal/rules/current/Memory-Rules.md`
+- Propose rule changes: `journal/rules/pending/` via `TEMPLATE.md` — **ingestion is not truth**
+- Quant may receive `decision_memory` text (past-available only); must not invent outcomes
 
 ---
 

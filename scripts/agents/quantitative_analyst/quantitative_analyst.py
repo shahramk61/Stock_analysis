@@ -472,6 +472,16 @@ Neural ensemble median + statistical overlays (HMM regime, GARCH forward vol, li
 Rich quantitative data layer ready for Researcher debate, risk sizing, and Trader decisioning.
 """
 
+        # Optional walk-forward decision memory (facts only; never invent outcomes)
+        mem_text = state.get("decision_memory") or ""
+        if mem_text:
+            quantitative_report = (
+                quantitative_report.rstrip()
+                + "\n\n**Decision Memory (past-available only)**\n"
+                + str(mem_text)
+                + "\n"
+            )
+
         # --- Debate contribution: facts template first; LLM may only rephrase ---
         debate_commentary = ""
         use_debate = debate_mode or (llm is not None)
@@ -498,6 +508,8 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
                 iv_data=iv_data,
                 liquidity_data={"cmf": cmf_data.get("cmf"), "vol_price_corr": vol_price_data.get("vol_price_corr")}
             )
+            if mem_text:
+                facts_block = facts_block.rstrip() + "\n\n" + str(mem_text)
             debate_commentary = facts_block
             if llm is not None:
                 rephrased, llm_warns = llm_rephrase_debate(llm, facts_block)
