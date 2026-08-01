@@ -179,7 +179,14 @@ def generate_json_report(data, scores, mc_result, profile):
         "current_price": data['current_price'],
         "overall_score": scores['overall'],
         "profile": profile,
-        "recommendation": "BUY" if scores['overall'] >= 70 else "HOLD" if scores['overall'] >= 50 else "SELL",
+        # Align with human report + README bands (was 70/50; text report uses 75/60)
+        "recommendation": (
+            "STRONG_BUY" if scores['overall'] >= 75 else
+            "BUY" if scores['overall'] >= 60 else
+            "HOLD" if scores['overall'] >= 50 else
+            "CAUTION" if scores['overall'] >= 35 else
+            "SELL"
+        ),
         "pillars": {
             "fundamentals": scores['fundamentals'],
             "technicals": scores['technicals'],

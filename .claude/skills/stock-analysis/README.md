@@ -1,3 +1,5 @@
-# Stock Analysis v4.1
+# Stock Analysis — legacy packaging
 
-Advanced Python stock analysis with quantitative signals for trading bot integration.
+Primary project docs: repo root `README.md`.  
+Primary agent skill: `.grok/skills/stock-analysis/`.  
+Python shims in this folder re-export from `scripts/` via `_canonical.py` if needed.

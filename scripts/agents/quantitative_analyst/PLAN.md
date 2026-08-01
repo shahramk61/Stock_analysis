@@ -30,7 +30,7 @@ scripts/
         └── PHASE2_IMPLEMENTATION_PLAN.md
 ```
 
-`.claude/skills/stock-analysis/scripts/` contains thin shims that re-export from `scripts/` via `_canonical.py`.
+Agent packaging lives under `.grok/skills/stock-analysis/` (primary). Optional legacy shims under `.claude/skills/stock-analysis/scripts/` re-export from `scripts/` via `_canonical.py`.
 
 ---
 

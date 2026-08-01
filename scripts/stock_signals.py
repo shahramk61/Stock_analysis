@@ -4,6 +4,28 @@ import numpy as np
 from datetime import datetime, timedelta
 import statsmodels.api as sm
 
+
+def _as_float(x, default: float = 0.0) -> float:
+    """Coerce pandas/numpy scalars to plain Python float (avoids Series leaking into reports/JSON)."""
+    try:
+        if x is None:
+            return float(default)
+        if isinstance(x, pd.Series):
+            if x.empty:
+                return float(default)
+            x = x.iloc[0]
+        if isinstance(x, pd.DataFrame):
+            if x.empty:
+                return float(default)
+            x = x.iloc[0, 0]
+        val = float(x)
+        if val != val:  # NaN
+            return float(default)
+        return val
+    except Exception:
+        return float(default)
+
+
 def get_iv_rank_and_skew(ticker: str, *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """IV rank/skew using options + historical vol. Supports hist/asof for backtests."""
     stock = yf.Ticker(ticker)
@@ -76,7 +98,7 @@ def get_earnings_surprise(ticker: str):
             return {"avg_surprise_pct": 0.0, "post_earnings_drift": 0.0}
         past = ed[ed['Reported EPS'].notna()].head(8)
         surprises = past['Surprise(%)'].dropna()
-        avg_surprise = float(surprises.mean()) if not surprises.empty else 0.0
+        avg_surprise = _as_float(surprises.mean()) if not surprises.empty else 0.0
         return {
             "avg_surprise_pct": round(avg_surprise, 2),
             "post_earnings_drift": 1.8
@@ -329,8 +351,8 @@ def get_garch_forecast(ticker: str, period: str = "5y", horizon: int = 5, *, his
         model = arch_model(returns, vol="Garch", p=1, q=1, dist="normal")
         res = model.fit(disp="off", show_warning=False)
         forecast = res.forecast(horizon=horizon)
-        vol_fc = float(np.sqrt(forecast.variance.iloc[-1].mean()))
-        hist_vol = float(returns.std())
+        vol_fc = float(np.sqrt(_as_float(forecast.variance.iloc[-1].mean())))
+        hist_vol = _as_float(returns.std())
         ratio = vol_fc / hist_vol if hist_vol > 0 else 1.0
         return {
             "garch_vol_forecast": round(vol_fc, 2),
@@ -353,28 +375,28 @@ def get_amihud_illiquidity(ticker: str, period: str = "1y", *, hist: "pd.DataFra
             return {"amihud": 0.0}
         ret = hist['Close'].pct_change().abs()
         dollar_vol = hist['Volume'] * hist['Close']
-        illiq = (ret / dollar_vol).mean()
+        illiq = _as_float((ret / dollar_vol).mean())
         return {"amihud": round(illiq * 1e9, 6)}
-    except:
+    except Exception:
         return {"amihud": 0.0}
 
 def get_share_turnover(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Annualized share turnover (%): avg daily volume / shares outstanding. Supports hist/asof."""
+    stock = yf.Ticker(ticker)  # always needed for shares outstanding (info is not in hist)
     if hist is None:
-        stock = yf.Ticker(ticker)
         h = stock.history(period=period)
     else:
         h = hist
     try:
         hist = h
-        info = stock.info
-        shares = info.get('sharesOutstanding', 0) or info.get('impliedSharesOutstanding', 0)
-        if shares == 0 or len(hist) == 0:
+        info = stock.info or {}
+        shares = info.get('sharesOutstanding', 0) or info.get('impliedSharesOutstanding', 0) or 0
+        if not shares or len(hist) == 0:
             return {"turnover": 0.0}
-        avg_vol = hist['Volume'].mean()
-        turnover = (avg_vol / shares) * 252 * 100
+        avg_vol = _as_float(hist['Volume'].mean())
+        turnover = (avg_vol / float(shares)) * 252 * 100
         return {"turnover": round(turnover, 2)}
-    except:
+    except Exception:
         return {"turnover": 0.0}
 
 def get_volume_price_correlation(ticker: str, period: str = "1y", *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
@@ -502,9 +524,9 @@ def get_monte_carlo_risk(ticker: str, paths: int = 10000,
                     "simulated_annual_vol": 35.0, "annual_drift": 8.0}
         closes  = hist['Close']
         rets    = closes.pct_change().dropna()
-        mu      = float(rets.mean() * 252)
-        sigma   = float(rets.std() * np.sqrt(252))
-        S0      = float(closes.iloc[-1])
+        mu      = _as_float(rets.mean()) * 252
+        sigma   = _as_float(rets.std()) * np.sqrt(252)
+        S0      = _as_float(closes.iloc[-1])
         dt      = 1.0 / 252.0
 
         np.random.seed(42)

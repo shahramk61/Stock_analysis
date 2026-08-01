@@ -81,7 +81,7 @@ This milestone directly supports the goal of trusting the agent before wiring it
 
 | Idea | Effort | Notes |
 |---|---|---|
-| Claude Project integration (upload 10-Ks) | Medium | Upload earnings transcripts as knowledge base for deeper analysis |
+| Document / 10-K knowledge base integration | Medium | Attach earnings transcripts & filings for deeper qualitative analysis |
 | Automated watchlist re-scoring on schedule | High | Requires persistent storage or cron-style trigger |
 | PDF generation via Pandoc | Low | `pandoc report.md -o report.pdf` if Pandoc installed |
 | Options chain analysis | High | IV, put/call ratio, max pain — new pillar or separate skill |

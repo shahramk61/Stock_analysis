@@ -1,8 +1,10 @@
-# Stock Analysis — Claude Code Skill & Python Pipeline (v5.0)
+# Stock Analysis — Python Pipeline & Agent Skill (v5.0)
 
-Comprehensive, data-driven stock analysis with a configurable weighted scoring model, GPU-accelerated ML signals, and structured JSON output for trading-bot integration.
+Independent, data-driven stock analysis: weighted scoring, GPU-accelerated ML signals, Quantitative Analyst reports, backtesting, and structured JSON for trading-bot integration.
 
-**Canonical code** lives in `scripts/` (signals, scoring, reports, dashboard). The Claude skill under `.claude/skills/stock-analysis/` re-exports from there.
+**This is your project** — a standalone Python codebase first. Optional agent skill packages live under `.grok/` for Grok Build (and compatible harnesses).
+
+**Canonical code** lives in `scripts/` (signals, scoring, reports, dashboard, backtester, quant agent).
 
 ---
 
@@ -10,12 +12,14 @@ Comprehensive, data-driven stock analysis with a configurable weighted scoring m
 
 - **Configurable investor profiles** — Balanced, Value, Growth, Momentum (adjusts pillar weights automatically)
 - **6-pillar weighted scoring** — Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 composite)
-- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, LSTM, Chronos-2, 7-model ensemble, FinBERT, etc.
-- **Risk management** — position sizing, ATR-based stop-losses, R/R ratio, auto-flagging
+- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, LSTM, Chronos-2, 7-model ensemble, FinBERT, X/social, etc.
+- **Quantitative Analyst agent** — structured report + conviction + debate contribution
+- **Backtester** — point-in-time replay, policy, equity curve, exportable decisions
+- **Risk management** — position sizing hooks, stop hints, auto-flagging
 - **Multi-horizon forecasts** — 5d / 10d / 15d / 20d / 50d with median and weighted ensembles
 - **Streamlit dashboard** — interactive exploration with Plotly charts
 - **JSON signal export** — `signals_TICKER.json` for trading-bot consumption
-- **Claude Code commands** — `/analyze-stock`, `/watchlist`
+- **Agent commands** — `/analyze-stock`, `/watchlist` (via `.grok/commands/`)
 
 ---
 
@@ -27,11 +31,7 @@ cd Stock_analysis
 python -m pip install -r requirements.txt
 ```
 
-For Claude Code only, copy `.claude/` into your project root, or open this repo directly:
-
-```bash
-claude
-```
+Open the repo in Grok Build (or any agent) from this directory — project skills under `.grok/` load automatically.
 
 ---
 
@@ -49,13 +49,16 @@ streamlit run scripts/dashboard.py
 
 # Quantitative Analyst smoke test
 python test_quant_analyst.py
+
+# Backtest (fast mode recommended)
+python scripts/backtest.py AAPL --start 2024-01-01 --fast --export
 ```
 
 Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).
 
 ---
 
-## Claude Code Usage
+## Agent Usage (Grok)
 
 ### Analyze a single stock
 
@@ -74,6 +77,8 @@ Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower)
 ```
 /watchlist AAPL MSFT NVDA GOOGL META AMZN
 ```
+
+You can also ask in natural language: *“Analyze NVDA with the Growth profile”* — the `stock-analysis` skill will guide the run.
 
 ---
 
@@ -94,7 +99,9 @@ Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower)
 | 60–74 | Buy |
 | 50–59 | Hold/Watch |
 | 35–49 | Caution |
-| 0–34 | Avoid |
+| 0–34 | Avoid / Sell |
+
+Human reports and JSON export use the same recommendation bands.
 
 ---
 
@@ -102,12 +109,13 @@ Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower)
 
 ```
 scripts/
-├── stock_signals.py      # Canonical signals (7-model ensemble, etc.)
+├── stock_signals.py      # Canonical signals (7-model ensemble, liquidity, etc.)
 ├── analyze.py, score.py, report.py, dashboard.py
+├── backtest.py + backtest/   # Historical replay + policy + metrics
 └── agents/quantitative_analyst/
 
-.claude/
-├── skills/stock-analysis/   # Skill definition + shims → scripts/
+.grok/
+├── skills/stock-analysis/   # Agent skill (primary)
 └── commands/                # /analyze-stock, /watchlist
 
 SKILL.md, ROADMAP.md, requirements.txt
@@ -117,7 +125,7 @@ SKILL.md, ROADMAP.md, requirements.txt
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for milestone status. Phase 2: integrate Quantitative Analyst into TradingAgents.
+See [ROADMAP.md](ROADMAP.md) for milestone status. Active focus: backtest validation before any live broker bridge.
 
 ---
 

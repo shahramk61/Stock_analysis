@@ -1,14 +1,16 @@
 """
-Quantitative Analyst Agent for TradingAgents
+Quantitative Analyst Agent — Stock Analysis pipeline
 
-This agent provides advanced quantitative signals using our local models
-(7-model neural ensemble: NHITS/TFT/PatchTST/NBEATS/TCN + LSTM + Chronos-2,
-plus HMM regime, GARCH vol, Monte Carlo risk, liquidity/volume alphas, quality,
-momentum, and statistical factors).
+Standalone data-provider node for this project; also portable into multi-agent
+frameworks (e.g. TradingAgents). Uses local models:
+
+- 7-model neural ensemble: NHITS/TFT/PatchTST/NBEATS/TCN + LSTM + Chronos-2
+- HMM regime, GARCH vol, Monte Carlo risk, liquidity/volume alphas, quality,
+  momentum, and statistical factors
+- Optional X/social sentiment injection for debates
 
 v1: Rich data provider (quantitative_report + structured signals).
-v2 stub: Optional debate_commentary when llm is supplied (template first;
-         can be upgraded to light llm synthesis in TradingAgents).
+v2: Optional debate_commentary (template-driven; LLM-upgradeable).
 """
 
 import os
