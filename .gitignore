@@ -15,6 +15,10 @@ lightning_logs/
 # Generated signal JSON files
 signals_*.json
 
+# Forecast / model caches
+.cache/
+x_sentiment_*.json
+
 # Backtest artifacts (decisions, simulated trade logs)
 backtest_decisions_*.json
 backtest_trade_log*.csv

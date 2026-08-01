@@ -20,6 +20,10 @@ __all__ = [
     "get_obv",
     "get_chaikin_money_flow",
     "get_monte_carlo_risk",
+    "get_classic_technicals",
+    "get_trend_structure",
+    "get_adx",
+    "normalize_direction",
     "get_finbert_sentiment",
     "get_lstm_forecast",
     "get_chronos_forecast",
@@ -30,5 +34,6 @@ __all__ = [
     "get_tcn_forecast",
     "get_nhits_tft_patchtst_ensemble",
     "get_multi_horizon_forecasts",
+    "get_x_ticker_sentiment",
     "_gpu_device",
 ]

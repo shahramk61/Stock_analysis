@@ -61,9 +61,11 @@ Pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 over
 
 See `requirements.txt` (yfinance, pandas, numpy, torch optional for GPU signals, streamlit/plotly for dashboard, arch/hmmlearn for regime/vol).
 
-## Version notes (v5.0)
+## Version notes (v5.0+)
 
 - Unified pipeline under `scripts/`
 - Quantitative Analyst + structured conviction / debate contribution
-- Backtesting foundation (as-of hist, policy, metrics, CLI)
+- Backtesting foundation (as-of hist, policy, metrics, CLI) + risk filters + position sizing
+- Risk pillar in overall score; RSI/MACD + SMA/ADX trend pack for agents
+- Faster multi-horizon defaults (5/20/50d, Chronos cache, LSTM early stop, score dedupe)
 - X/social sentiment hook for debates (`get_x_ticker_sentiment`)

@@ -11,8 +11,8 @@ Independent, data-driven stock analysis: weighted scoring, GPU-accelerated ML si
 ## Features
 
 - **Configurable investor profiles** — Balanced, Value, Growth, Momentum (adjusts pillar weights automatically)
-- **6-pillar weighted scoring** — Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 composite)
-- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, LSTM, Chronos-2, 7-model ensemble, FinBERT, X/social, etc.
+- **6-pillar weighted scoring** — Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 composite; Risk is scored, not cosmetic)
+- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, RSI/MACD, SMA/ADX trend pack, LSTM, Chronos-2, multi-horizon ensemble, FinBERT, X/social, etc.
 - **Quantitative Analyst agent** — structured report + conviction + debate contribution
 - **Backtester** — point-in-time replay, policy, equity curve, exportable decisions
 - **Risk management** — position sizing hooks, stop hints, auto-flagging
@@ -52,9 +52,13 @@ python test_quant_analyst.py
 
 # Backtest (fast mode recommended)
 python scripts/backtest.py AAPL --start 2024-01-01 --fast --export
+
+# Demo / no neural forecasts / relaxed policy for simulator visibility
+python scripts/backtest.py AAPL --start 2024-06-01 --fast --no-forecasts --relaxed --debate --export
 ```
 
-Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).
+Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).  
+Forecasts default to horizons **5d / 20d / 50d** for speed; full set available via code (`full_horizons=True`).
 
 ---
 
@@ -92,6 +96,8 @@ You can also ask in natural language: *“Analyze NVDA with the Growth profile�
 | Sentiment | 10% | 10% | 10% | 15% |
 | ESG | 10% | 10% | 5% | 10% |
 | Risk | 15% | 15% | 15% | 15% |
+
+Risk uses MC VaR, GARCH vol ratio, ATR clustering, Altman zone, and HMM regime.
 
 | Score | Rating |
 |---|---|

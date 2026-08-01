@@ -1,13 +1,9 @@
 """
 Quantitative Analyst Agent — Stock Analysis pipeline
 
-Standalone data-provider node for this project; also portable into multi-agent
-frameworks (e.g. TradingAgents). Uses local models:
-
-- 7-model neural ensemble: NHITS/TFT/PatchTST/NBEATS/TCN + LSTM + Chronos-2
-- HMM regime, GARCH vol, Monte Carlo risk, liquidity/volume alphas, quality,
-  momentum, and statistical factors
-- Optional X/social sentiment injection for debates
+Standalone data-provider node; portable into multi-agent frameworks.
+Uses local models + classical indicators (RSI/MACD/SMA/ADX), HMM/GARCH,
+Monte Carlo risk, liquidity/volume alphas, quality, momentum, X/social.
 
 v1: Rich data provider (quantitative_report + structured signals).
 v2: Optional debate_commentary (template-driven; LLM-upgradeable).
@@ -132,21 +128,22 @@ def compute_quant_conviction(
         return "Medium", 3
 
 
-def _generate_debate_stub(ticker: str, conviction: str, regime: str, highlights: str) -> str:
+def _generate_quant_debate_contribution(ticker: str, conviction: str, regime: str, highlights: str,
+                                         takeaways: list = None, x_data: dict = None,
+                                         risk_data: dict = None, mom_data: dict = None,
+                                         quality_data: dict = None, earnings_data: dict = None,
+                                         iv_data: dict = None, liquidity_data: dict = None) -> str:
     """
-    v2 debate participation stub.
+    Richer v2 debate participation contribution from the Quantitative Analyst.
 
-    Returns a concise, speakable contribution the Quant Analyst could offer
-    in the Researcher bull/bear debate.
+    Produces a substantial, multi-paragraph + bulleted expert statement explicitly built
+    to serve as high-quality input for a real multi-turn researcher bull/bear debate.
 
-    This is deliberately template-driven and LLM-free so the smoke test and
-    local usage never require API keys. In a full TradingAgents environment
-    where `llm` is a real model, you can replace/augment the body with:
+    Everything is 100% derived from the quantitative signals + report data (no invented facts
+    or LLM hallucination in the base version). The structure gives other agents concrete
+    things to agree with, counter, or drill into (data points, risks, positives, open questions).
 
-        prompt = f"Using ONLY these quantitative facts, write a 2-3 sentence ...: {highlights}"
-        debate_commentary = llm.invoke(prompt)   # or equivalent
-
-    Keep the signals as the source of truth; use LLM only for phrasing.
+    LLM-upgrade path: pass an llm and use this as the "facts only" grounding prompt.
     """
     tone = {
         "High": "leans constructive for the bull case but still flags risk limits",
@@ -154,10 +151,64 @@ def _generate_debate_stub(ticker: str, conviction: str, regime: str, highlights:
         "Medium": "is balanced — useful neutral data for both sides",
     }.get(conviction, "is mixed")
 
-    return (
-        f"[Quant Analyst] On {ticker}: conviction {conviction} ({regime} regime). "
-        f"{highlights}. This data {tone}."
-    )
+    parts = [
+        f"[Quant Analyst] On {ticker}: conviction {conviction} ({regime} regime).",
+        "",
+        f"Key quantitative snapshot: {highlights}.",
+    ]
+
+    # Positive / supportive elements
+    positives = []
+    if mom_data and isinstance(mom_data.get("mom_6m"), (int, float)) and mom_data.get("mom_6m", 0) > 5:
+        positives.append(f"6m momentum +{mom_data['mom_6m']:.1f}% (positive trend)")
+    if quality_data and quality_data.get("quality") == "High":
+        positives.append(f"High quality (GP {quality_data.get('gross_profitability')}% + low accruals)")
+    if earnings_data and isinstance(earnings_data.get("avg_surprise_pct"), (int, float)) and earnings_data.get("avg_surprise_pct", 0) > 5:
+        positives.append(f"Strong earnings surprise history (+{earnings_data['avg_surprise_pct']:.1f}% avg)")
+    if positives:
+        parts.append("")
+        parts.append("Data points leaning constructive:")
+        for p in positives:
+            parts.append(f"- {p}")
+
+    # Risk / caution elements (always emphasize tail risk when present)
+    risks = []
+    if risk_data:
+        var95 = risk_data.get("var_95")
+        if var95 and var95 > 20:
+            risks.append(f"MC 95% VaR {var95}% (elevated tail risk — 10k paths)")
+    if regime == "Bear":
+        risks.append("HMM regime is Bear (downside momentum detected)")
+    if iv_data and iv_data.get("ivr", 50) > 70:
+        risks.append(f"Elevated options uncertainty (IV Rank {iv_data.get('ivr')}% )")
+    if risks:
+        parts.append("")
+        parts.append("Key risks the bear case should stress:")
+        for r in risks:
+            parts.append(f"- {r}")
+
+    if takeaways:
+        parts.append("")
+        parts.append("Supporting model observations (directly from the ensemble):")
+        for t in (takeaways or [])[:5]:
+            parts.append(f"- {t}")
+
+    if x_data and (x_data.get("num_posts", 0) > 0 or x_data.get("overall_sentiment") not in ("Neutral", "N/A")):
+        parts.append("")
+        x_note = f"Recent X/social flow: ~{x_data.get('num_posts',0)} posts with {x_data.get('overall_sentiment','Neutral')} tone (score {x_data.get('sentiment_score',50)}). "
+        parts.append(x_note + "Can inform sentiment momentum or retail/influencer reaction.")
+
+    parts.append("")
+    parts.append(f"Overall: This data {tone}.")
+
+    # Debate participation closer — gives other agents explicit hooks for multi-turn
+    parts.append("")
+    if conviction in ("Low", "Medium"):
+        parts.append("For the debate: I would push the bear side to focus on the tail-risk and regime data above. Happy to expand on any specific path distribution, horizon disagreement, or liquidity signal if the team wants to size a position.")
+    else:
+        parts.append("For the debate: The bull case can lean on the quality/earnings/momentum elements while the bear side should still respect the VaR and regime flags. Open to drilling into any number.")
+
+    return "\n".join(parts)
 
 
 def create_quantitative_analyst(llm=None, debate_mode: bool = False):
@@ -196,6 +247,9 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
                 get_volume_price_correlation,
                 get_simple_formulaic_alpha,
                 get_share_turnover,
+                get_classic_technicals,
+                get_trend_structure,
+                get_adx,
                 # X / social news & sentiment (new for richer debates)
                 get_x_ticker_sentiment,
             )
@@ -229,15 +283,27 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
             "mom_6m": 0.0, "mom_12m": 0.0, "pct_from_52w_high": 0.0,
         }
 
-        horizon_data   = _safe_fetch("multi_horizon", get_multi_horizon_forecasts, {"horizons": {}}, warnings, ticker)
+        use_forecasts = state.get("use_forecasts", True)
+        hist = state.get("hist")
+        asof = state.get("asof")
+        replay_kw = {}
+        if hist is not None:
+            replay_kw["hist"] = hist
+        if asof is not None:
+            replay_kw["asof"] = asof
+
+        if use_forecasts:
+            horizon_data   = _safe_fetch("multi_horizon", get_multi_horizon_forecasts, {"horizons": {}}, warnings, ticker)
+        else:
+            horizon_data = {"horizons": {}, "consensus_direction": "Neutral", "trend_signal": "Stable"}
         risk_data      = _safe_fetch("monte_carlo_risk", get_monte_carlo_risk, {"var_95": 20.0, "cvar_95": 28.0, "simulated_annual_vol": 30.0}, warnings, ticker)
-        beta_data      = _safe_fetch("rolling_beta", get_rolling_beta, {"beta": 1.0, "alpha": 0.0}, warnings, ticker)
-        iv_data        = _safe_fetch("iv_rank_skew", get_iv_rank_and_skew, {"ivr": 50, "iv": 30.0, "skew": 0.0}, warnings, ticker)
+        beta_data      = _safe_fetch("rolling_beta", get_rolling_beta, {"beta": 1.0, "alpha": 0.0}, warnings, ticker, **replay_kw)
+        iv_data        = _safe_fetch("iv_rank_skew", get_iv_rank_and_skew, {"ivr": 50, "iv": 30.0, "skew": 0.0}, warnings, ticker, **replay_kw)
         altman_data    = _safe_fetch("altman_beneish", calculate_altman_beneish, {"z_score": 3.0, "risk_level": "Medium"}, warnings, ticker)
         earnings_data  = _safe_fetch("earnings_surprise", get_earnings_surprise, {"avg_surprise_pct": 0.0}, warnings, ticker)
 
-        regime_data    = _safe_fetch("market_regime", get_market_regime, {"regime": "Neutral", "probs": [0.33, 0.34, 0.33]}, warnings, ticker)
-        garch_data     = _safe_fetch("garch", get_garch_forecast, {"garch_vol_forecast": 0.0, "vol_ratio": 1.0}, warnings, ticker)
+        regime_data    = _safe_fetch("market_regime", get_market_regime, {"regime": "Neutral", "probs": [0.33, 0.34, 0.33]}, warnings, ticker, **replay_kw)
+        garch_data     = _safe_fetch("garch", get_garch_forecast, {"garch_vol_forecast": 0.0, "vol_ratio": 1.0}, warnings, ticker, **replay_kw)
         # Piotroski returns a scalar (0-9), not a dict — handle specially
         try:
             piotroski = calculate_piotroski_f_score(ticker)
@@ -246,21 +312,26 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
         except Exception as e:
             warnings.append(f"piotroski: {str(e)[:100]}")
             piotroski = 5
-        atr_data       = _safe_fetch("atr_vol", get_atr_volatility_clustering, {"atr_percent": 0.0, "vol_clustering": "Normal", "risk_level": "Normal"}, warnings, ticker)
-        mom_data       = _safe_fetch("momentum_52w", get_momentum_and_52w_high, {"mom_6m": 0.0, "mom_12m": 0.0, "pct_from_52w_high": 0.0}, warnings, ticker)
-        rs_data        = _safe_fetch("rel_strength", get_relative_strength, {"rs_spy": 0.0, "rs_sector": 0.0}, warnings, ticker)
-        amihud         = _safe_fetch("amihud", get_amihud_illiquidity, {"amihud": 0.0}, warnings, ticker)
-        obv_data       = _safe_fetch("obv", get_obv, {"obv_change_20d_pct": 0.0}, warnings, ticker)
-        cmf_data       = _safe_fetch("cmf", get_chaikin_money_flow, {"cmf": 0.0, "cmf_signal": "Neutral"}, warnings, ticker)
+        atr_data       = _safe_fetch("atr_vol", get_atr_volatility_clustering, {"atr_percent": 0.0, "vol_clustering": "Normal", "risk_level": "Normal"}, warnings, ticker, **replay_kw)
+        mom_data       = _safe_fetch("momentum_52w", get_momentum_and_52w_high, {"mom_6m": 0.0, "mom_12m": 0.0, "pct_from_52w_high": 0.0}, warnings, ticker, **replay_kw)
+        rs_data        = _safe_fetch("rel_strength", get_relative_strength, {"rs_spy": 0.0, "rs_sector": 0.0}, warnings, ticker, **replay_kw)
+        amihud         = _safe_fetch("amihud", get_amihud_illiquidity, {"amihud": 0.0}, warnings, ticker, **replay_kw)
+        obv_data       = _safe_fetch("obv", get_obv, {"obv_change_20d_pct": 0.0}, warnings, ticker, **replay_kw)
+        cmf_data       = _safe_fetch("cmf", get_chaikin_money_flow, {"cmf": 0.0, "cmf_signal": "Neutral"}, warnings, ticker, **replay_kw)
 
         # New signals (polish)
         quality_data   = _safe_fetch("quality_gp_accruals", get_quality_accruals_gross_profit, {"gross_profitability": 0.0, "accruals_ratio": 0.0, "quality": "Unknown"}, warnings, ticker)
-        vol_price_data = _safe_fetch("vol_price_corr", get_volume_price_correlation, {"vol_price_corr": 0.0, "interpretation": "Neutral"}, warnings, ticker)
-        formulaic_data = _safe_fetch("formulaic_alpha", get_simple_formulaic_alpha, {"alpha": 0.0, "alpha_signal": "Neutral"}, warnings, ticker)
-        turnover_data  = _safe_fetch("share_turnover", get_share_turnover, {"turnover": 0.0}, warnings, ticker)
+        vol_price_data = _safe_fetch("vol_price_corr", get_volume_price_correlation, {"vol_price_corr": 0.0, "interpretation": "Neutral"}, warnings, ticker, **replay_kw)
+        formulaic_data = _safe_fetch("formulaic_alpha", get_simple_formulaic_alpha, {"alpha": 0.0, "alpha_signal": "Neutral"}, warnings, ticker, **replay_kw)
+        turnover_data  = _safe_fetch("share_turnover", get_share_turnover, {"turnover": 0.0}, warnings, ticker, **replay_kw)
+        classic_data   = _safe_fetch("classic_technicals", get_classic_technicals, {"rsi": 50.0, "macd_hist": 0.0, "macd_cross": "Neutral", "rsi_zone": "Neutral"}, warnings, ticker, **replay_kw)
+        trend_data     = _safe_fetch("trend_structure", get_trend_structure, {"stack": "Unknown", "golden_cross": False, "death_cross": False, "pct_above_sma200": 0.0}, warnings, ticker, **replay_kw)
+        adx_data       = _safe_fetch("adx", get_adx, {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "trend_strength": "Unknown"}, warnings, ticker, **replay_kw)
 
         # X / social news & sentiment (new for richer debates; recent-only, graceful in backtests)
-        x_data         = _safe_fetch("x_sentiment", get_x_ticker_sentiment, {"volume": 0, "sentiment_score": 50.0, "overall_sentiment": "Neutral", "num_posts": 0, "note": "X data not available"}, warnings, ticker)
+        # Support pre_fetched injection (from backtester or demo scripts) for live X data via session tools
+        x_pre = state.get("x_sentiment_pre_fetched") or state.get("pre_fetched_x")
+        x_data         = _safe_fetch("x_sentiment", get_x_ticker_sentiment, {"volume": 0, "sentiment_score": 50.0, "overall_sentiment": "Neutral", "num_posts": 0, "note": "X data not available"}, warnings, ticker, pre_fetched=x_pre)
 
         # --- Richer ensemble metadata from horizon_data ---
         horizons = horizon_data.get("horizons", {})
@@ -280,6 +351,8 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
         trend       = horizon_data.get("trend_signal", "Stable")
         disagreement = horizon_data.get("model_disagreement", horizon_data.get("horizons", {}).get("5d", {}).get("model_disagreement", "N/A"))
         num_models  = horizon_data.get("horizons", {}).get("5d", {}).get("num_models", "N/A")
+
+        forecast_note = "" if use_forecasts else " [forecasting signals disabled]"
 
         # --- Conviction (now using the clean tunable helper) ---
         conviction, raw_score = compute_quant_conviction(
@@ -333,7 +406,7 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
 **Executive Summary**  
 7-model neural ensemble (NHITS + TFT + PatchTST + NBEATS + TCN + LSTM + Chronos-2) + HMM/GARCH/statistical factors for {ticker}. Multi-horizon outlook, tail-risk (Monte Carlo), regime, quality, momentum, liquidity/volume alphas, and formulaic signals.
 
-**Multi-Horizon Ensemble Forecasts** (consensus: {consensus}, trend: {trend}, models: {num_models}, disagreement: {disagreement})
+**Multi-Horizon Ensemble Forecasts** (consensus: {consensus}, trend: {trend}, models: {num_models}, disagreement: {disagreement}){forecast_note}
 | Horizon | Predicted Return | Direction |
 |---------|------------------|-----------|
 {multi_horizon_text}
@@ -351,6 +424,9 @@ def create_quantitative_analyst(llm=None, debate_mode: bool = False):
 - Altman Z-Score: {altman_data.get('z_score', 'N/A')} ({altman_data.get('risk_level', 'N/A')})
 - Momentum: 6m {mom_data.get('mom_6m', 'N/A')}% | 12m {mom_data.get('mom_12m', 'N/A')}% | 52w high proximity: {mom_data.get('pct_from_52w_high', 'N/A')}%
 - Rel. Strength: vs SPY {rs_data.get('rs_spy', 'N/A')}% | vs Sector {rs_data.get('rs_sector', 'N/A')}%
+- Classic: RSI {classic_data.get('rsi', 'N/A')} ({classic_data.get('rsi_zone', 'N/A')}) | MACD hist {classic_data.get('macd_hist', 'N/A')} ({classic_data.get('macd_cross', 'N/A')})
+- Trend: SMA stack **{trend_data.get('stack', 'N/A')}** | vs SMA200 {trend_data.get('pct_above_sma200', 'N/A')}% | golden={trend_data.get('golden_cross')} death={trend_data.get('death_cross')}
+- ADX: {adx_data.get('adx', 'N/A')} ({adx_data.get('trend_strength', 'N/A')}) | +DI {adx_data.get('plus_di', 'N/A')} / −DI {adx_data.get('minus_di', 'N/A')}
 
 **Liquidity, Flow, Volume & Options**
 - IV Rank: {iv_data.get('ivr', 'N/A')}% | IV: {iv_data.get('iv', 'N/A')}% | Skew: {iv_data.get('skew', 'N/A')}
@@ -378,20 +454,33 @@ Neural ensemble median + statistical overlays (HMM regime, GARCH forward vol, li
 Rich quantitative data layer ready for Researcher debate, risk sizing, and Trader decisioning.
 """
 
-        # --- v2 Debate participation stub (template-driven; LLM-upgradeable) ---
+        # --- Rich debate contribution (multi-point, signals-only, supports multi-turn) ---
         debate_commentary = ""
         use_debate = debate_mode or (llm is not None)
         if use_debate:
             hl = (
                 f"VaR {risk_data.get('var_95')}% | regime {regime_str} | "
-                f"Piotroski {piotroski} | Mom6m {mom_data.get('mom_6m')}% | IVR {iv_data.get('ivr')}%"
+                f"Piotroski {piotroski} | Mom6m {mom_data.get('mom_6m')}% | IVR {iv_data.get('ivr')}% | "
+                f"Quality {quality_data.get('quality', 'Unknown')} | Earnings surprise {earnings_data.get('avg_surprise_pct', 'N/A')}% | "
+                f"Beta {beta_data.get('beta', 'N/A')}"
             )
             # Include X/social if we have meaningful recent data (volume or non-neutral sentiment)
             x_vol = x_data.get('num_posts', 0) or 0
             x_sent = x_data.get('overall_sentiment', 'Neutral')
             if x_vol > 5 or x_sent not in ('Neutral', 'N/A'):
                 hl += f" | X vol ~{x_vol}, {x_sent} sentiment"
-            debate_commentary = _generate_debate_stub(ticker, conviction, regime_str, hl)
+
+            debate_commentary = _generate_quant_debate_contribution(
+                ticker, conviction, regime_str, hl,
+                takeaways=takeaways,
+                x_data=x_data,
+                risk_data=risk_data,
+                mom_data=mom_data,
+                quality_data=quality_data,
+                earnings_data=earnings_data,
+                iv_data=iv_data,
+                liquidity_data={"cmf": cmf_data.get("cmf"), "vol_price_corr": vol_price_data.get("vol_price_corr")}
+            )
 
         # --- Structured output for downstream agents (highly valuable in TradingAgents) ---
         quantitative_signals = {
@@ -421,6 +510,9 @@ Rich quantitative data layer ready for Researcher debate, risk sizing, and Trade
             "earnings_surprise": earnings_data.get("avg_surprise_pct"),
             "garch": garch_data,
             "atr": atr_data,
+            "classic": classic_data,
+            "trend": trend_data,
+            "adx": adx_data,
             "x_sentiment": x_data,
         }
 

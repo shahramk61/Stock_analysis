@@ -22,14 +22,22 @@ description: >
 # Single-name analysis
 python scripts/analyze.py TICKER --profile Balanced --output both
 
-# Fast backtest
+# Fast backtest (no heavy ML retrain)
 python scripts/backtest.py TICKER --start 2024-01-01 --fast --export
+
+# No neural forecasts + relaxed demo policy (exercises simulator)
+python scripts/backtest.py TICKER --start 2024-06-01 --fast --no-forecasts --relaxed --debate --export
 
 # Quant-only smoke test
 python test_quant_analyst.py
+
+# Unit tests (no-lookahead + indicators + policy filters)
+python tests/test_no_lookahead.py
 ```
 
 Profiles: `Balanced` | `Growth` | `Value` | `Momentum`.
+
+**Agent tips:** Prefer `--fast` for multi-step backtests. Risk pillar, RSI/MACD, SMA stack, and ADX are first-class agent inputs in JSON/report.
 
 ## Output rules
 

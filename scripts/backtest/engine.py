@@ -16,7 +16,7 @@ import pandas as pd
 
 from .data import load_historical_data, asof_snapshot, get_price_series
 from .metrics import compute_metrics
-from .policy import default_policy, TradeSignal
+from .policy import default_policy, TradeSignal, position_size_shares
 
 @dataclass
 class BacktestResult:
@@ -50,6 +50,9 @@ class Backtester:
         rebalance_days: int = 5,  # e.g. weekly-ish
         fast_mode: bool = False,
         debate_mode: bool = False,
+        x_pre_fetched: dict | None = None,
+        relaxed: bool = False,   # pass-through for demo relaxed policy thresholds
+        use_forecasts: bool = True,  # set False to disable neural forecasting signals (multi-horizon, LSTM, Chronos, ensembles)
         # policy: Optional[Callable] = None,
     ):
         self.ticker = ticker.upper()
@@ -61,6 +64,9 @@ class Backtester:
         self.rebalance_days = rebalance_days
         self.fast_mode = fast_mode
         self.debate_mode = debate_mode
+        self.x_pre_fetched = x_pre_fetched
+        self.relaxed = relaxed
+        self.use_forecasts = use_forecasts
         # self.policy = policy or default_policy
 
         self._data: Optional[Dict[str, Any]] = None
@@ -115,7 +121,8 @@ class Backtester:
                 dyn = not self.fast_mode
                 use_gpu = not self.fast_mode
                 scores = calculate_pillars(replay_data, self.profile, compute_dynamic_weights=dyn,
-                                           hist=hist_slice, asof=str(asof), use_gpu_signals=use_gpu)
+                                           hist=hist_slice, asof=str(asof), use_gpu_signals=use_gpu,
+                                           use_forecasts=getattr(self, "use_forecasts", True))
             except Exception as e:
                 scores = {"overall": 50.0, "signals": {}, "error": str(e)[:100]}
 
@@ -124,7 +131,15 @@ class Backtester:
             try:
                 from agents.quantitative_analyst.quantitative_analyst import create_quantitative_analyst
                 quant_node = create_quantitative_analyst(debate_mode=self.debate_mode)
-                q_state = {"ticker": self.ticker, "company_of_interest": self.ticker, "messages": []}
+                q_state = {
+                    "ticker": self.ticker,
+                    "company_of_interest": self.ticker,
+                    "messages": [],
+                    "x_sentiment_pre_fetched": self.x_pre_fetched,
+                    "use_forecasts": getattr(self, "use_forecasts", True),
+                    "hist": hist_slice,
+                    "asof": str(asof),
+                }
                 quant_out = quant_node(q_state)
             except Exception as e:
                 quant_out = {"quantitative_conviction": "Medium", "error": str(e)[:80]}
@@ -137,6 +152,7 @@ class Backtester:
                 atr_pct=float( (scores.get("signals", {}).get("atr_vol", {}) or {}).get("atr_percent", 0) ),
                 mc_risk=scores.get("signals", {}).get("mc_risk"),
                 profile=self.profile,
+                relaxed=self.relaxed,
             )
             action = sig.action
             size = 0.0
@@ -157,11 +173,35 @@ class Backtester:
             COMMISSION_PCT = 0.001   # 0.1% round-trip (tune per broker)
             SLIPPAGE_PCT  = 0.0005   # 0.05% one-way slippage
 
+            if self.relaxed and action == "long" and position > 0:
+                # Demo rebalance for relaxed mode: close the current position (record the period's P&L
+                # as a closed trade) and immediately re-enter a fresh position sized to current risk/price/ATR.
+                # This creates visible "much trades" activity and per-rebalance P&L in the log/JSON for
+                # validation purposes, even when the policy stays "long" every day (no natural flats or stops).
+                # Not used in strict (non-relaxed) backtests.
+                exit_cost = position * current_price * (COMMISSION_PCT/2 + SLIPPAGE_PCT)
+                cash += (position * current_price - exit_cost)
+                if trades:
+                    trades[-1]["exit_date"] = str(asof)
+                    trades[-1]["exit_price"] = current_price
+                    gross_pnl = (current_price - entry_price) * position
+                    net_pnl = gross_pnl - trades[-1].get("entry_cost", 0) - exit_cost
+                    trades[-1]["pnl"] = round(net_pnl, 2)
+                    trades[-1]["exit_cost"] = round(exit_cost, 2)
+                position = 0
+                # fall through to re-entry below
+
             if action == "long" and position == 0 and cash > 0:
-                risk_amt = cash * self.risk_per_trade
-                atr_val = float(atr.get("atr_percent", 2.0) or 2.0)
-                risk_per_share = max(current_price * 0.01, current_price * (atr_val / 100) * 1.5)
-                shares = max(1, int(risk_amt / risk_per_share))
+                # Prefer policy risk % when set; else CLI risk_per_trade
+                risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
+                shares = position_size_shares(
+                    equity=cash,
+                    risk_pct=risk_pct,
+                    price=current_price,
+                    stop_price=stop,
+                )
+                if shares <= 0:
+                    shares = 1
 
                 # Apply entry costs
                 entry_cost = shares * current_price * (COMMISSION_PCT/2 + SLIPPAGE_PCT)
@@ -219,6 +259,29 @@ class Backtester:
             eq_df["drawdown"] = (eq_df["equity"] - roll_max) / roll_max
 
         # Use metrics (Phase 3 progress)
+        # Finalize any still-open position at the very end of the backtest period.
+        # This ensures the trade log records a "pnl" (marked-to-end) so that
+        # win_rate / expectancy / num closed trades reflect reality, even if
+        # the policy never produced a "flat" or stop exit.
+        if position > 0 and trades:
+            # Use the last available price from the series
+            if not price_series.empty:
+                final_price = float(
+                    price_series.iloc[-1].item()
+                    if hasattr(price_series.iloc[-1], "item")
+                    else price_series.iloc[-1]
+                )
+                exit_cost = position * final_price * (COMMISSION_PCT / 2 + SLIPPAGE_PCT)
+                gross_pnl = (final_price - entry_price) * position
+                net_pnl = gross_pnl - trades[-1].get("entry_cost", 0) - exit_cost
+                last_date = str(price_series.index[-1].date())
+                trades[-1]["exit_date"] = last_date
+                trades[-1]["exit_price"] = round(final_price, 2)
+                trades[-1]["pnl"] = round(net_pnl, 2)
+                trades[-1]["exit_cost"] = round(exit_cost, 2)
+                # Note: we do not adjust the final equity record here; it already reflects MTM.
+                # This just closes the blotter entry for stats/export.
+
         metrics = compute_metrics(eq_df, trades)
 
         # Basic buy-and-hold benchmark using the price series we already loaded

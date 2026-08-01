@@ -71,11 +71,21 @@
 - [x] `calculate_pillars` + Quant Analyst node made replayable (pass-through `hist`/`asof`, `use_gpu_signals` for fast mode, `debate_mode` for conversation stub)
 - [x] Real policy on agent outputs: `default_policy` consumes overall score + multi-horizon consensus + `quantitative_conviction` + risk signals → `TradeSignal` (action, risk size, stop, rationale)
 - [x] Simulator + metrics: risk-based position entry, basic stops/exits, equity curve, drawdown, vs buy-and-hold benchmark, trade logging
-- [x] CLI (`scripts/backtest.py`): `--fast` (skips heavy ML retraining), `--debate` (exercises multi-turn conversation stub), `--validate` (prints no-lookahead + benchmark notes), `--export` (per-date decisions JSON with score/action/conviction/debate_note for analysis and future execution bridge)
-- [~] Validation: one-day conversation demos (full quant report + debate contribution) + short-period runs with metrics vs BH done; longer 6-12+ month runs + synthetic tests recommended next
-- [ ] No-lookahead assertions + spot-checks vs live `analyze.py` on frozen historical dates
+- [x] CLI (`scripts/backtest.py`): `--fast`, `--debate`, `--export`, `--validate`, `--relaxed`, `--no-forecasts`
+- [x] Hard risk filters (high VaR / Bear → flat) + ATR/stop-based `position_size_shares`
+- [x] No-lookahead / indicator unit tests (`tests/test_no_lookahead.py`)
+- [~] Longer 6–12 month validation runs (use `--fast --export`; document results as needed)
 
 This milestone directly supports the goal of trusting the agent before wiring it to a live broker/agentic API (e.g. Robinhood).
+
+## Milestone 10 — Indicators & Model Performance ✅
+
+- [x] **Risk pillar** actually included in overall score (profile weights)
+- [x] Wire **RSI / MACD** into scoring + Quant Analyst + policy
+- [x] **Trend pack**: SMA 20/50/200 stack, golden/death flags, **ADX**
+- [x] Multi-horizon speed: default horizons `[5,20,50]`, lower NF `max_steps`, LSTM early stop, Chronos pipeline cache
+- [x] Score dedupe: one multi-horizon train path for pillar boosts (no triple LSTM/Chronos/ensemble)
+- [x] Direction label normalization for policy matching
 
 ## Milestone 9 — Future Ideas
 
@@ -86,4 +96,5 @@ This milestone directly supports the goal of trusting the agent before wiring it
 | PDF generation via Pandoc | Low | `pandoc report.md -o report.pdf` if Pandoc installed |
 | Options chain analysis | High | IV, put/call ratio, max pain — new pillar or separate skill |
 | Dividend growth analysis | Medium | Separate scoring track for income investors |
-| Quant Analyst v2 debate participation | Medium | Optional speaking role in researcher debate |
+| Bollinger / vol percentile stretch indicators | Low | Optional after trend pack |
+| Full 5-horizon forecasts always on | Low | `full_horizons=True` already supported |

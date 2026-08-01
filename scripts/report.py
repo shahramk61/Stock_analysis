@@ -16,10 +16,24 @@ def generate_report(data, scores, mc_result, profile):
     print(f"Overall Score : {scores['overall']}/100   |   Profile: {profile}")
     rec = '🟢 STRONG BUY' if scores['overall'] >= 75 else '🟡 BUY' if scores['overall'] >= 60 else '🔴 HOLD/SELL'
     print(f"Recommendation: {rec}")
-    
+    print(
+        f"Pillars — Fund {scores.get('fundamentals')} | Tech {scores.get('technicals')} | "
+        f"Val {scores.get('valuation')} | Sent {scores.get('sentiment')} | "
+        f"ESG {scores.get('esg_quality')} | Risk {scores.get('risk', 'N/A')}"
+    )
+
     print("\n🔬 Advanced Signals:")
     signals = scores['signals']
-    
+
+    classic = signals.get("classic") or {}
+    trend = signals.get("trend") or {}
+    adx = signals.get("adx") or {}
+    if classic:
+        print(f"• RSI / MACD       : {classic.get('rsi', 'N/A')} ({classic.get('rsi_zone', 'N/A')}) | {classic.get('macd_cross', 'N/A')}")
+    if trend:
+        print(f"• Trend (SMA)      : {trend.get('stack', 'N/A')} | vs200 {trend.get('pct_above_sma200', 'N/A')}%")
+    if adx:
+        print(f"• ADX              : {adx.get('adx', 'N/A')} ({adx.get('trend_strength', 'N/A')})")
     print(f"• IV Rank          : {signals['ivr']['ivr']}%")
     print(f"• Altman Z-Score   : {signals['distress']['z_score']} → {signals['distress']['risk_level']}")
     print(f"• DCF Upside       : {signals['dcf'].get('upside_pct', 0):+.1f}%")
@@ -193,7 +207,7 @@ def generate_json_report(data, scores, mc_result, profile):
             "valuation": scores['valuation'],
             "sentiment": scores['sentiment'],
             "esg_quality": scores['esg_quality'],
-            "risk": scores.get('risk', 70)
+            "risk": scores.get('risk', 70),
         },
         "signals": scores['signals'],
         "monte_carlo": mc_result

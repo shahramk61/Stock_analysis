@@ -499,8 +499,173 @@ def get_chaikin_money_flow(ticker: str, period: str = "1y", window: int = 20, *,
             "cmf": round(float(current_cmf), 3),
             "cmf_signal": signal
         }
-    except:
+    except Exception:
         return {"cmf": 0.0, "cmf_signal": "Neutral"}
+
+
+def _load_price_hist(ticker: str, period: str = "2y", *, hist=None, asof=None) -> "pd.DataFrame":
+    """Shared history loader for price-based indicators (supports hist/asof)."""
+    if hist is not None and len(hist) > 0:
+        h = hist.copy()
+    else:
+        stock = yf.Ticker(ticker)
+        if asof:
+            h = stock.history(period=period, end=asof)
+        else:
+            h = stock.history(period=period)
+    if h is None or h.empty:
+        return pd.DataFrame()
+    if asof is not None and hist is not None:
+        # Extra safety: never use bars after asof when a full hist was passed
+        try:
+            h = h.loc[:pd.Timestamp(asof)]
+        except Exception:
+            pass
+    return h
+
+
+def get_classic_technicals(ticker: str, period: str = "1y", *, hist=None, asof=None):
+    """RSI(14) + MACD(12,26,9) for agents/scoring. As-of safe via hist/asof."""
+    try:
+        h = _load_price_hist(ticker, period=period, hist=hist, asof=asof)
+        if len(h) < 35:
+            return {"rsi": 50.0, "macd": 0.0, "macd_signal": 0.0, "macd_hist": 0.0,
+                    "macd_cross": "Neutral", "rsi_zone": "Neutral"}
+        close = h["Close"]
+        delta = close.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.rolling(14).mean()
+        avg_loss = loss.rolling(14).mean()
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        rsi = _as_float((100 - (100 / (1 + rs))).iloc[-1], 50.0)
+        ema_fast = close.ewm(span=12, adjust=False).mean()
+        ema_slow = close.ewm(span=26, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        histogram = macd_line - signal_line
+        macd_v = _as_float(macd_line.iloc[-1])
+        sig_v = _as_float(signal_line.iloc[-1])
+        hist_v = _as_float(histogram.iloc[-1])
+        prev_hist = _as_float(histogram.iloc[-2]) if len(histogram) > 1 else 0.0
+        if prev_hist <= 0 < hist_v:
+            cross = "BullishCross"
+        elif prev_hist >= 0 > hist_v:
+            cross = "BearishCross"
+        elif hist_v > 0:
+            cross = "Bullish"
+        elif hist_v < 0:
+            cross = "Bearish"
+        else:
+            cross = "Neutral"
+        zone = "Overbought" if rsi >= 70 else ("Oversold" if rsi <= 30 else "Neutral")
+        return {
+            "rsi": round(rsi, 2),
+            "macd": round(macd_v, 4),
+            "macd_signal": round(sig_v, 4),
+            "macd_hist": round(hist_v, 4),
+            "macd_cross": cross,
+            "rsi_zone": zone,
+        }
+    except Exception:
+        return {"rsi": 50.0, "macd": 0.0, "macd_signal": 0.0, "macd_hist": 0.0,
+                "macd_cross": "Neutral", "rsi_zone": "Neutral"}
+
+
+def get_trend_structure(ticker: str, period: str = "2y", *, hist=None, asof=None):
+    """SMA 20/50/200 stack + golden/death cross flags. As-of safe."""
+    try:
+        h = _load_price_hist(ticker, period=period, hist=hist, asof=asof)
+        if len(h) < 210:
+            # Fall back with whatever length we have
+            if len(h) < 50:
+                return {
+                    "sma20": 0.0, "sma50": 0.0, "sma200": 0.0, "price": 0.0,
+                    "stack": "Unknown", "golden_cross": False, "death_cross": False,
+                    "pct_above_sma200": 0.0,
+                }
+        close = h["Close"]
+        price = _as_float(close.iloc[-1])
+        sma20 = _as_float(close.rolling(20).mean().iloc[-1], price)
+        sma50 = _as_float(close.rolling(50).mean().iloc[-1], price)
+        sma200 = _as_float(close.rolling(200).mean().iloc[-1], price) if len(close) >= 200 else sma50
+        # Golden/death: SMA50 vs SMA200 relationship + recent cross
+        golden = sma50 > sma200 and price > sma200
+        death = sma50 < sma200 and price < sma200
+        if len(close) >= 210:
+            prev50 = _as_float(close.rolling(50).mean().iloc[-5], sma50)
+            prev200 = _as_float(close.rolling(200).mean().iloc[-5], sma200)
+            if prev50 <= prev200 and sma50 > sma200:
+                golden = True
+            if prev50 >= prev200 and sma50 < sma200:
+                death = True
+        if sma20 > sma50 > sma200:
+            stack = "Bullish"
+        elif sma20 < sma50 < sma200:
+            stack = "Bearish"
+        else:
+            stack = "Mixed"
+        pct_200 = ((price - sma200) / sma200 * 100) if sma200 else 0.0
+        return {
+            "sma20": round(sma20, 2),
+            "sma50": round(sma50, 2),
+            "sma200": round(sma200, 2),
+            "price": round(price, 2),
+            "stack": stack,
+            "golden_cross": bool(golden and not death),
+            "death_cross": bool(death and not golden),
+            "pct_above_sma200": round(pct_200, 2),
+        }
+    except Exception:
+        return {
+            "sma20": 0.0, "sma50": 0.0, "sma200": 0.0, "price": 0.0,
+            "stack": "Unknown", "golden_cross": False, "death_cross": False,
+            "pct_above_sma200": 0.0,
+        }
+
+
+def get_adx(ticker: str, period: str = "1y", window: int = 14, *, hist=None, asof=None):
+    """Average Directional Index (trend strength). As-of safe."""
+    try:
+        h = _load_price_hist(ticker, period=period, hist=hist, asof=asof)
+        if len(h) < window * 3:
+            return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "trend_strength": "Unknown"}
+        high, low, close = h["High"], h["Low"], h["Close"]
+        up = high.diff()
+        down = -low.diff()
+        plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+        minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+        tr = pd.concat([
+            high - low,
+            (high - close.shift()).abs(),
+            (low - close.shift()).abs(),
+        ], axis=1).max(axis=1)
+        atr = pd.Series(tr).rolling(window).mean()
+        plus_di = 100 * pd.Series(plus_dm, index=h.index).rolling(window).mean() / atr.replace(0, np.nan)
+        minus_di = 100 * pd.Series(minus_dm, index=h.index).rolling(window).mean() / atr.replace(0, np.nan)
+        dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+        adx = _as_float(dx.rolling(window).mean().iloc[-1])
+        pdi = _as_float(plus_di.iloc[-1])
+        mdi = _as_float(minus_di.iloc[-1])
+        strength = "Strong" if adx >= 25 else ("Moderate" if adx >= 20 else "Weak")
+        return {
+            "adx": round(adx, 2),
+            "plus_di": round(pdi, 2),
+            "minus_di": round(mdi, 2),
+            "trend_strength": strength,
+        }
+    except Exception:
+        return {"adx": 0.0, "plus_di": 0.0, "minus_di": 0.0, "trend_strength": "Unknown"}
+
+
+def normalize_direction(direction) -> str:
+    """Normalize Bullish/Bearish/Neutral labels (strip emojis)."""
+    s = str(direction or "Neutral").lower()
+    if "bull" in s:
+        return "Bullish"
+    if "bear" in s:
+        return "Bearish"
+    return "Neutral"
 
 
 def get_monte_carlo_risk(ticker: str, paths: int = 10000,
@@ -595,13 +760,21 @@ class _LSTMForecaster(nn.Module if _TORCH_AVAILABLE else object):
         return self.fc(out[:, -1, :])
 
 
-def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: float = 0.001, batch_size: int = 64, prediction_length: int = 5):
-    """Direct multi-horizon LSTM (predicts all prediction_length steps in one forward pass)."""
+def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 30, lr: float = 0.001, batch_size: int = 64, prediction_length: int = 5,
+                      *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
+    """Direct multi-horizon LSTM (predicts all prediction_length steps in one forward pass).
+
+    Defaults: 30 epochs with early stopping (was 80) for faster agent/backtest runs.
+    """
     device = "cuda" if (_TORCH_AVAILABLE and torch.cuda.is_available()) else "cpu"
     try:
-        hist = yf.Ticker(ticker).history(period="5y")
-        if len(hist) < 100: return {"predicted_return_pct": 0.5, "direction": "Neutral"}
-        closes = hist['Close'].dropna()
+        if hist is None:
+            h = yf.Ticker(ticker).history(period="5y", end=asof) if asof else yf.Ticker(ticker).history(period="5y")
+        else:
+            h = hist
+        if len(h) < 100:
+            return {"predicted_return_pct": 0.5, "direction": "Neutral"}
+        closes = h['Close'].dropna()
         returns = closes.pct_change().dropna().values.astype(np.float32)
         if len(returns) <= seq_len + prediction_length:
             seq_len = max(5, (len(returns) - prediction_length) // 3)
@@ -621,7 +794,12 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
         dataset = TensorDataset(X_train, y_train)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
         model.train()
+        best_loss = float("inf")
+        stall = 0
+        patience = 5
         for epoch in range(epochs):
+            epoch_loss = 0.0
+            n_batches = 0
             for xb, yb in loader:
                 xb, yb = xb.to(device), yb.to(device)
                 pred = model(xb)
@@ -629,28 +807,59 @@ def get_lstm_forecast(ticker: str, seq_len: int = 40, epochs: int = 80, lr: floa
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                epoch_loss += float(loss.item())
+                n_batches += 1
+            avg = epoch_loss / max(n_batches, 1)
+            if avg < best_loss - 1e-5:
+                best_loss = avg
+                stall = 0
+            else:
+                stall += 1
+                if stall >= patience:
+                    break
         model.eval()
         current_seq = torch.tensor(returns[-seq_len:], dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
         with torch.no_grad():
             raw = model(current_seq).cpu().numpy().flatten()
         predictions = [float(max(min(p, 0.06), -0.06)) for p in raw]
         final_pred = sum(predictions)  # cumulative return over horizon
-        direction = "Bullish 📈" if final_pred > 0.01 else "Bearish 📉" if final_pred < -0.01 else "Neutral ➕"
+        direction = "Bullish" if final_pred > 0.01 else "Bearish" if final_pred < -0.01 else "Neutral"
         return {"predicted_return_pct": round(final_pred * 100, 2), "direction": direction,
                 "prediction_length": prediction_length,
                 "all_predictions": [round(p * 100, 3) for p in predictions],
-                "device_used": device, "model": f"LSTM-DirectMH ({prediction_length}d)"}
-    except Exception as e: return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
+                "device_used": device, "model": f"LSTM-DirectMH ({prediction_length}d)",
+                "epochs_ran": epoch + 1}
+    except Exception as e:
+        return {"predicted_return_pct": 0.0, "direction": "Neutral", "error": str(e)[:100]}
 
 
-def get_chronos_forecast(ticker: str, prediction_length: int = 5, use_covariates: bool = True):
+# Module-level Chronos pipeline cache (load once per process/device)
+_CHRONOS_PIPELINES: dict = {}
+
+
+def _get_chronos_pipeline(device_map: str = "cpu"):
+    """Cached Chronos-2 pipeline — avoids reloading weights on every forecast call."""
+    if device_map not in _CHRONOS_PIPELINES:
+        from chronos import Chronos2Pipeline
+        _CHRONOS_PIPELINES[device_map] = Chronos2Pipeline.from_pretrained(
+            "amazon/chronos-2", device_map=device_map
+        )
+    return _CHRONOS_PIPELINES[device_map]
+
+
+def get_chronos_forecast(ticker: str, prediction_length: int = 5, use_covariates: bool = True,
+                         *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """Chronos-2 with multivariate context [Close,Volume,RSI,ATR]. Falls back to univariate."""
     try:
-        from chronos import Chronos2Pipeline
         device_map = "cuda" if (_TORCH_AVAILABLE and torch.cuda.is_available()) else "cpu"
-        pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2", device_map=device_map)
-        hist = yf.Ticker(ticker).history(period="2y")
-        if len(hist) < 50: return {"error": "Insufficient data"}
+        pipeline = _get_chronos_pipeline(device_map)
+        if hist is None:
+            h = yf.Ticker(ticker).history(period="2y", end=asof) if asof else yf.Ticker(ticker).history(period="2y")
+        else:
+            h = hist
+        if len(h) < 50:
+            return {"error": "Insufficient data", "direction": "Neutral"}
+        hist = h
 
         multivariate_used = False
         features_used = ["Close"]
@@ -692,7 +901,7 @@ def get_chronos_forecast(ticker: str, prediction_length: int = 5, use_covariates
         daily_prices_q50  = [round(float(p), 2) for p in q50_arr]
 
         pred_return = daily_returns_q50[-1] if daily_returns_q50 else 0.0
-        direction = "Bullish 📈" if pred_return > 1.0 else "Bearish 📉" if pred_return < -1.0 else "Neutral ➕"
+        direction = "Bullish" if pred_return > 1.0 else "Bearish" if pred_return < -1.0 else "Neutral"
         q10v_last = daily_returns_q10[-1] if daily_returns_q10 else 0.0
         q90v_last = daily_returns_q90[-1] if daily_returns_q90 else 0.0
 
@@ -1018,26 +1227,38 @@ def _compute_dynamic_weights(ticker: str, val_h: int = 10):
         return None
 
 
-def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dynamic_weights: bool = False):
+def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dynamic_weights: bool = False,
+                                full_horizons: bool = False, max_steps: int = 20,
+                                *, hist: "pd.DataFrame | None" = None, asof: str | None = None):
     """
-    Multi-horizon ensemble forecast (5d/10d/15d/20d/50d) using 7 models:
+    Multi-horizon ensemble forecast using 7 models:
     NHITS + TFT + PatchTST + N-BEATS + TCN + LSTM + Chronos-2.
-    Returns median, avg, static-weighted, optionally dynamic-weighted predictions per horizon.
+
+    Default horizons are [5, 20, 50] for speed (was all of 5/10/15/20/50).
+    Pass full_horizons=True or horizons=[...] for the full set.
+    max_steps defaults to 20 (was 40). Chronos pipeline is process-cached.
     """
     if horizons is None:
-        horizons = [5, 10, 15, 20, 50]
+        horizons = [5, 10, 15, 20, 50] if full_horizons else [5, 20, 50]
     if not _NF_AVAILABLE:
         return {"error": "neuralforecast not installed", "horizons": {}}
     device = _gpu_device()
     if _TORCH_AVAILABLE and device == 'cuda':
         torch.set_float32_matmul_precision('high')
     try:
-        hist = yf.Ticker(ticker).history(period="5y")
-        if len(hist) < 100:
+        if hist is None:
+            h = yf.Ticker(ticker).history(period="5y", end=asof) if asof else yf.Ticker(ticker).history(period="5y")
+        else:
+            h = hist
+        if len(h) < 100:
             return {"error": "Insufficient history", "horizons": {}}
+        hist = h
 
+        idx = hist.index
+        if getattr(idx, "tz", None) is not None:
+            idx = idx.tz_localize(None)
         df = pd.DataFrame({"unique_id": "stock",
-                           "ds": hist.index.tz_localize(None),
+                           "ds": idx,
                            "y": hist["Close"].values})
         last_price = float(hist["Close"].iloc[-1])
         results    = {}
@@ -1047,22 +1268,24 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dyna
         if compute_dynamic_weights:
             dynamic_weights_info = _compute_dynamic_weights(ticker, val_h=10)
 
+        # Prefer a smaller NF model set for speed; full set still available via components
+        nf_models = [(NHITS, "NHITS"), (TFT, "TFT"), (PatchTST, "PatchTST"),
+                     (NBEATS, "NBEATS"), (TCN, "TCN")]
+
         for h in horizons:
             model_preds = []
             model_preds_named = []
             model_daily_preds = {}
-            for ModelClass, name in [(NHITS, "NHITS"), (TFT, "TFT"),
-                                     (PatchTST, "PatchTST"), (NBEATS, "NBEATS"),
-                                     (TCN, "TCN")]:
+            for ModelClass, name in nf_models:
                 try:
                     extra = {}
                     if ModelClass is TFT:
                         extra = {"hidden_size": 128, "n_head": 4}
                     elif ModelClass is PatchTST:
                         extra = {"hidden_size": 128, "n_heads": 4}
-                    kwargs = dict(h=h, input_size=120, max_steps=40,
+                    kwargs = dict(h=h, input_size=120, max_steps=max_steps,
                                   learning_rate=0.001, loss=MAE(), valid_loss=MAE(),
-                                  early_stop_patience_steps=8, batch_size=32,
+                                  early_stop_patience_steps=5, batch_size=32,
                                   windows_batch_size=512, random_seed=42, **extra)
                     nf = NeuralForecast(models=[ModelClass(**kwargs)], freq="B")
                     val_size = max(h, int(len(df) * 0.1))
@@ -1078,7 +1301,7 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dyna
 
             # LSTM (direct multi-horizon) — convert incremental → cumulative
             try:
-                lstm_r = get_lstm_forecast(ticker, prediction_length=h)
+                lstm_r = get_lstm_forecast(ticker, prediction_length=h, hist=hist, asof=asof)
                 if lstm_r and "all_predictions" in lstm_r and "error" not in lstm_r:
                     lstm_inc = lstm_r["all_predictions"]
                     lstm_cum, s = [], 0.0
@@ -1093,9 +1316,9 @@ def get_multi_horizon_forecasts(ticker: str, horizons: list = None, compute_dyna
             except Exception:
                 pass
 
-            # Chronos-2 — already cumulative
+            # Chronos-2 — already cumulative (pipeline cached)
             try:
-                ch_r = get_chronos_forecast(ticker, prediction_length=h)
+                ch_r = get_chronos_forecast(ticker, prediction_length=h, hist=hist, asof=asof)
                 if ch_r and "all_predictions" in ch_r and "error" not in ch_r:
                     ch_cum = list(ch_r["all_predictions"])
                     if ch_cum:
