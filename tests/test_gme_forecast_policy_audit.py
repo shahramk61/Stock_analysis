@@ -82,8 +82,8 @@ def test_path_c_blocked_when_conviction_low_even_if_consensus_bullish():
     assert risk_m > 0
 
 
-def test_high_var_hard_block_flats_path_c_long():
-    """Even if multi-h path would long, VaR>30 hard-filters to flat (GME-like)."""
+def test_extreme_var_hard_block_flats_path_c_long():
+    """Extreme VaR (>45) hard-flats even with Path C opt-in (GME-class tails)."""
     scores = {
         "overall": 57.0,
         "signals": {
@@ -97,14 +97,12 @@ def test_high_var_hard_block_flats_path_c_long():
             },
             "mc_risk": {"var_95": 67.4, "risk_level": "High"},
             "regime": {"regime": "Neutral"},
-            # Neutral tech so Path B (trend) does not fire; Path C (multi-h) does
             "classic": {"macd_cross": "Neutral"},
             "adx": {"adx": 12.0, "plus_di": 15.0, "minus_di": 15.0},
             "trend": {"stack": "Mixed", "death_cross": False, "golden_cross": False},
             "finbert": {"sentiment_score": 50.0, "overall_sentiment": "Neutral"},
         },
     }
-    # Medium conv + Path C opt-in → long candidate, then hard VaR filter → flat
     pre = choose_entry(
         57.0,
         "Medium",
@@ -120,7 +118,7 @@ def test_high_var_hard_block_flats_path_c_long():
         allow_multi_horizon_entry=True,
     )
     assert sig.action == "flat", sig.rationale
-    assert "VaR" in sig.rationale or "risk filter" in sig.rationale
+    assert "extreme VaR" in sig.rationale or "VaR" in sig.rationale
 
 
 def test_forecasts_off_empty_multi_horizon_via_score():
@@ -164,7 +162,7 @@ def test_extract_leverage_flags_reads_multi_h_bullish():
 
 if __name__ == "__main__":
     test_path_c_blocked_when_conviction_low_even_if_consensus_bullish()
-    test_high_var_hard_block_flats_path_c_long()
+    test_extreme_var_hard_block_flats_path_c_long()
     test_forecasts_off_empty_multi_horizon_via_score()
     test_extract_leverage_flags_reads_multi_h_bullish()
     print("All GME forecast/policy audit tests passed.")

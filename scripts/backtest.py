@@ -34,8 +34,13 @@ def main():
     parser.add_argument("--start", default="2024-01-01", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", default=None, help="End date (default today)")
     parser.add_argument("--profile", default="Balanced", choices=["Balanced", "Growth", "Value", "Momentum"])
-    parser.add_argument("--capital", type=float, default=100000.0, help="Starting capital")
-    parser.add_argument("--risk", type=float, default=0.01, help="Risk per trade as fraction of capital")
+    parser.add_argument("--capital", type=float, default=3000.0, help="Starting capital (default $3000)")
+    parser.add_argument(
+        "--risk",
+        type=float,
+        default=0.20,
+        help="Risk per trade as fraction of capital (default 0.20 = 20%%)",
+    )
     parser.add_argument("--rebalance-days", type=int, default=5, help="Decision every N trading days")
     parser.add_argument("--fast", action="store_true", help="Skip GPU retrain (FinBERT still on unless fully offline)")
     parser.add_argument(

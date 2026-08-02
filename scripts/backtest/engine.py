@@ -72,9 +72,9 @@ class Backtester:
         ticker: str,
         start: str | date,
         end: str | date | None = None,
-        initial_capital: float = 100_000.0,
+        initial_capital: float = 3_000.0,
         profile: str = "Balanced",
-        risk_per_trade: float = 0.01,
+        risk_per_trade: float = 0.20,
         rebalance_days: int = 5,
         fast_mode: bool = False,
         debate_mode: bool = False,
@@ -94,7 +94,7 @@ class Backtester:
         self.end = str(end) if end else str(date.today())
         self.initial_capital = float(initial_capital)
         self.profile = profile
-        self.risk_per_trade = risk_per_trade
+        self.risk_per_trade = max(0.0, float(risk_per_trade))
         self.rebalance_days = max(1, int(rebalance_days))
         self.fast_mode = fast_mode
         self.debate_mode = debate_mode
@@ -116,6 +116,25 @@ class Backtester:
         if self._data is None:
             self._data = load_historical_data(self.ticker, self.start, self.end)
         return self._data
+
+    def _resolve_risk_pct(self, suggested_risk_pct: Optional[float]) -> float:
+        """
+        Map policy suggested_risk_pct onto CLI risk_per_trade.
+
+        Policy historically emits ~0.006–0.015 (relative to a 1% unit). Scale so
+        risk_per_trade=0.20 means ~20% capital at risk for a full-size long, while
+        policy/memory size cuts still shrink risk proportionally.
+        """
+        base = float(self.risk_per_trade)
+        if base <= 0:
+            return 0.0
+        pol = float(suggested_risk_pct or 0.0)
+        if pol <= 0:
+            return base
+        # Legacy policy unit ≈ 1% of capital
+        legacy_unit = 0.01
+        scaled = base * (pol / legacy_unit)
+        return max(0.0, min(scaled, base * 2.0))
 
     def _close_position(
         self,
@@ -431,8 +450,7 @@ class Backtester:
                         # Never carry overnight; only schedule next-open long when flat
                         if sig.action == "long" and position == 0:
                             equity_now = cash
-                            risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
-                            risk_pct *= SESSION_RISK_SCALE
+                            risk_pct = self._resolve_risk_pct(sig.suggested_risk_pct) * SESSION_RISK_SCALE
                             stop_for_size = c * (1.0 - self.session_stop_pct)
                             if sig.stop_price is not None and 0 < float(sig.stop_price) < c:
                                 stop_for_size = max(float(sig.stop_price), stop_for_size)
@@ -461,7 +479,7 @@ class Backtester:
                             pending = {"side": "sell", "reason": "flat", "meta": decision_note}
                         elif sig.action == "long" and position == 0:
                             equity_now = cash
-                            risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
+                            risk_pct = self._resolve_risk_pct(sig.suggested_risk_pct)
                             shares = position_size_shares(
                                 equity=equity_now,
                                 risk_pct=risk_pct,

@@ -9,7 +9,11 @@ This file captures the audit of existing decision/risk logic (from plan Phase 0)
 - **JSON export**: STRONG_BUY ≥75, BUY ≥60, HOLD ≥50, CAUTION ≥35, else SELL (aligned).
 - **Dashboard**: similar thresholds; Strong Buy 75+, Buy 60+, Hold/Watch 50+.
 - Multi-horizon consensus/trend + quant conviction drive `default_policy` (backtest), not the static rec string alone.
-- **Risk filters (strict):** VaR>30 or Bear regime → flat; elevated VaR / bearish MACD+ADX/SMA → size cut.
+- **Risk filters (first principles ladder):**
+  - Hard flat: Bear regime; extreme VaR (>45); high VaR (>30) **and** structural breakdown (death cross / Bearish stack / strong ADX down).
+  - Size cut only: high VaR without breakdown **and** clear uptrend (Bullish stack / golden / strong trend) (×0.3); elevated VaR >20 (×0.5); soft MACD/trend caution; FinBERT bear.
+  - High VaR + Mixed (no golden) → flat (cuts TSLA-style stabs).
+  - Lesson: LLY VaR 31–43 + Bullish stack size-cuts; TSLA VaR 61 + Bear/death hard-flat; Mixed+high VaR no long.
 - **Execution models:**
   - **swing (default):** signal at decision close → **next open fill**; **daily stop on low** (gap → open); **flat exits** next open; multi-day holds; size **cash-capped** (≤95% notional).
   - **session (`--session`):** same-day open→close on daily bars; prior-close signal → next open; stop on low; force **session_close** at EOD (never overnight); gap-down cancel; tighter ~1.5% stops; slight risk haircut.

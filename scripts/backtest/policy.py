@@ -1,8 +1,16 @@
 """
 Decision policy for the backtesting agent.
 
-Uses multi-channel leverage (score, conviction, multi-horizon consensus,
-SMA/ADX trend, FinBERT/news, memory) with hard risk filters (VaR, Bear regime).
+First principles (long-only swing agent):
+1. Capital protection: refuse longs in structural breakdown (Bear regime,
+   death-cross / Bearish stack with elevated tail risk).
+2. Risk is continuous: moderate–high VaR sizes down; only *extreme* VaR
+   hard-flats without requiring breakdown.
+3. Separate "no trade" from "trade small" — do not equate VaR 31% in a Bull
+   regime with VaR 61% + Bear (LLY vs TSLA lesson).
+4. Entry needs a constructive path (score/conviction/trend/news); multi-horizon
+   Path C remains opt-in research.
+5. Memory cooldowns always win over new risk.
 """
 
 from __future__ import annotations
@@ -11,6 +19,12 @@ from typing import Dict, Any, Optional, Literal, Tuple, List
 
 
 Action = Literal["long", "short", "flat"]
+
+# VaR ladder (MC 95% simulated annual-ish units from pipeline)
+VAR_ELEVATED = 20.0   # size cut
+VAR_HIGH = 30.0       # deep size cut unless structural breakdown → hard flat
+VAR_EXTREME = 45.0    # hard flat regardless of trend/regime
+
 
 
 @dataclass
@@ -97,6 +111,12 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
     )
 
     var95 = float(mcr.get("var_95") or 0)
+    # Structural breakdown: not just "MACD soft" — death cross / Bearish stack
+    structural_breakdown = (
+        stack == "Bearish"
+        or death
+        or (stack != "Bullish" and not golden and adx_val >= 25 and minus_di > plus_di + 5)
+    )
 
     return {
         "consensus": consensus,
@@ -105,6 +125,9 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
         "trend_bull": trend_bull or trend_bull_soft,
         "trend_bull_strong": trend_bull and trend_bull_soft,
         "trend_bear": trend_bear,
+        "structural_breakdown": structural_breakdown,
+        "death_cross": death,
+        "golden_cross": golden,
         "stack": stack,
         "macd_cross": macd_cross,
         "adx": adx_val,
@@ -114,10 +137,114 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
         "finbert_score": fb_score,
         "regime": regime,
         "regime_bear": str(regime) == "Bear",
+        "regime_bull": str(regime) == "Bull",
         "var95": var95,
-        "high_var": var95 > 30,
-        "elevated_var": var95 > 20,
+        "high_var": var95 > VAR_HIGH,
+        "elevated_var": var95 > VAR_ELEVATED,
+        "extreme_var": var95 > VAR_EXTREME,
     }
+
+
+def apply_risk_filters(
+    action: Action,
+    risk: float,
+    rationale: str,
+    lev: Dict[str, Any],
+    overall: float,
+    *,
+    session: bool = False,
+) -> Tuple[Action, float, str]:
+    """
+    Layer risk on a proposed entry.
+
+    Hard flat (no new long):
+      - Bear regime
+      - Extreme VaR (>45)
+      - High VaR (>30) *and* structural breakdown (death/Bearish stack/…)
+      - Bearish multi-h consensus on non-elite scores
+      - Session: weak mid-score without strong trend
+
+    Size cuts (still long when constructive):
+      - High VaR without breakdown → deep cut
+      - Elevated VaR → moderate cut
+      - Soft trend/news caution → mild cut
+    """
+    if action != "long":
+        return action, risk, rationale
+
+    var95 = lev["var95"]
+    regime = lev["regime"]
+
+    # 1) Structural / regime hard blocks
+    if lev["regime_bear"]:
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: Bear regime → flat",
+        )
+    if lev["extreme_var"]:
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: extreme VaR={var95}% (>{VAR_EXTREME}) → flat",
+        )
+    if lev["high_var"] and lev["structural_breakdown"]:
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: VaR={var95}% + structural breakdown "
+            f"(stack={lev['stack']}, death_cross={lev.get('death_cross')}) → flat",
+        )
+
+    # 2) Forecast consensus block (only when multi-h is meaningful)
+    if lev["consensus_bear"] and overall < 68:
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: Bearish multi-horizon consensus → flat",
+        )
+
+    # 3) Graduated VaR sizing — high VaR longs need clear trend structure
+    #    (Bullish stack or golden cross). Mixed + high VaR stays flat (TSLA May
+    #    stabs) while LLY-style Bullish stack still trades small.
+    if lev["high_var"]:
+        clear_uptrend = (
+            lev.get("stack") == "Bullish"
+            or lev.get("golden_cross")
+            or lev.get("trend_bull_strong")
+        )
+        if not clear_uptrend:
+            return (
+                "flat",
+                0.0,
+                f"{rationale} | risk filter: high VaR={var95}% without clear "
+                f"uptrend (stack={lev.get('stack')}) → flat",
+            )
+        risk = max(0.002, risk * 0.30)
+        rationale = (
+            f"{rationale} | size cut: high VaR {var95}% "
+            f"(clear uptrend — not flat)"
+        )
+    elif lev["elevated_var"]:
+        risk = max(0.002, risk * 0.50)
+        rationale = f"{rationale} | size cut: elevated VaR {var95}%"
+
+    if lev["trend_bear"] and overall < 65 and not lev["structural_breakdown"]:
+        # Soft technical friction (e.g. MACD bearish under bullish stack)
+        risk = max(0.002, risk * 0.50)
+        rationale = f"{rationale} | trend caution: MACD/ADX/SMA stack"
+    if lev["news_bear"]:
+        risk = max(0.002, risk * 0.70)
+        rationale = f"{rationale} | size cut: bearish FinBERT"
+
+    if session and overall < 55 and not lev["trend_bull_strong"]:
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | session filter: score<{55} without strong trend → flat",
+        )
+
+    return action, risk, rationale
 
 
 def choose_entry(
@@ -264,34 +391,9 @@ def default_policy(
         overall, q_conv, lev, allow_multi_horizon_entry=allow_multi_horizon_entry
     )
 
-    # ── Hard risk filters ───────────────────────────────────────────────────
-    var95 = lev["var95"]
-    regime = lev["regime"]
-
-    if action == "long":
-        if lev["high_var"] or lev["regime_bear"]:
-            action = "flat"
-            risk = 0.0
-            rationale = f"{rationale} | risk filter: VaR={var95}% regime={regime} → flat"
-        elif lev["consensus_bear"] and overall < 68:
-            # Soft paths cannot fight bearish ensemble; classic high score still blocked unless very strong
-            action = "flat"
-            risk = 0.0
-            rationale = f"{rationale} | risk filter: Bearish multi-horizon consensus → flat"
-        elif lev["elevated_var"]:
-            risk = max(0.002, risk * 0.5)
-            rationale = f"{rationale} | size cut: elevated VaR {var95}%"
-        if action == "long" and lev["trend_bear"] and overall < 65:
-            risk = max(0.002, risk * 0.5)
-            rationale = f"{rationale} | trend caution: MACD/ADX/SMA stack"
-        if action == "long" and lev["news_bear"]:
-            risk = max(0.002, risk * 0.7)
-            rationale = f"{rationale} | size cut: bearish FinBERT"
-        # Session: avoid weak mid-score longs (round-trip cost sensitivity)
-        if session and action == "long" and overall < 55 and not lev["trend_bull_strong"]:
-            action = "flat"
-            risk = 0.0
-            rationale = f"{rationale} | session filter: score<{55} without strong trend → flat"
+    action, risk, rationale = apply_risk_filters(
+        action, risk, rationale, lev, overall, session=session
+    )
 
     multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h") or {}
     if action == "long" and isinstance(multi, dict):

@@ -48,12 +48,33 @@ def test_trend_path_allows_long_mid_score():
     assert sig.suggested_risk_pct > 0
 
 
-def test_high_var_blocks_trend_long():
-    s = _scores(55.0, stack="Bullish", golden=True, var95=35.0, regime="Neutral")
+def test_high_var_constructive_structure_size_cuts_not_flat():
+    """First principles: VaR 35% + Bullish stack is trade-small, not hard flat (LLY class)."""
+    s = _scores(55.0, stack="Bullish", golden=True, var95=35.0, regime="Bull", macd="Bullish")
     sig = default_policy(s, quant_output={"quantitative_conviction": "Medium"}, current_price=100.0)
-    assert sig.action == "flat"
-    assert "risk filter" in sig.rationale
-    assert "VaR" in sig.rationale
+    assert sig.action == "long", sig.rationale
+    assert "size cut" in sig.rationale and "VaR" in sig.rationale
+    # Deep cut vs base ~0.01 path
+    assert 0 < sig.suggested_risk_pct < 0.01
+
+
+def test_high_var_with_structural_breakdown_flats():
+    """High VaR + death/Bearish stack remains hard flat (TSLA-class tape)."""
+    s = _scores(55.0, stack="Bearish", golden=False, var95=37.0, regime="Neutral", macd="Bearish")
+    s["signals"]["trend"]["death_cross"] = True
+    sig = default_policy(s, quant_output={"quantitative_conviction": "Medium"}, current_price=100.0)
+    # May never enter choose_entry long if trend_bear blocks paths — force high score High conv
+    s2 = _scores(62.0, stack="Bearish", var95=37.0, regime="Neutral", macd="Bearish")
+    s2["signals"]["trend"]["death_cross"] = True
+    sig = default_policy(s2, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat", sig.rationale
+
+
+def test_extreme_var_hard_flats_even_if_bullish():
+    s = _scores(72.0, stack="Bullish", golden=True, var95=50.0, regime="Bull", macd="Bullish")
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat", sig.rationale
+    assert "extreme VaR" in sig.rationale
 
 
 def test_bear_regime_blocks_long():
@@ -61,6 +82,24 @@ def test_bear_regime_blocks_long():
     sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
     assert sig.action == "flat"
     assert "Bear" in sig.rationale or "risk filter" in sig.rationale
+
+
+def test_lly_style_high_score_var31_bull_allows_long():
+    """Regression: score 60 High + Bullish stack + VaR 31.2 must not hard-flat."""
+    s = _scores(60.2, stack="Bullish", golden=True, var95=31.2, regime="Bull", macd="Neutral")
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "long", sig.rationale
+    assert sig.suggested_risk_pct > 0
+    assert "size cut" in sig.rationale
+
+
+def test_high_var_mixed_stack_without_golden_stays_flat():
+    """TSLA-class: high VaR + Mixed stack (no golden) must not size into longs."""
+    s = _scores(59.5, stack="Mixed", golden=False, var95=37.6, regime="Neutral", macd="Bullish")
+    # Path B may propose long via MACD; high-VaR filter should reject without clear uptrend
+    sig = default_policy(s, quant_output={"quantitative_conviction": "Medium"}, current_price=100.0)
+    assert sig.action == "flat", sig.rationale
+    assert "high VaR" in sig.rationale and "clear uptrend" in sig.rationale
 
 
 def test_bearish_consensus_blocks_soft_long():
@@ -132,8 +171,12 @@ def test_memory_still_blocks_after_leverage():
 
 if __name__ == "__main__":
     test_trend_path_allows_long_mid_score()
-    test_high_var_blocks_trend_long()
+    test_high_var_constructive_structure_size_cuts_not_flat()
+    test_high_var_with_structural_breakdown_flats()
+    test_extreme_var_hard_flats_even_if_bullish()
     test_bear_regime_blocks_long()
+    test_lly_style_high_score_var31_bull_allows_long()
+    test_high_var_mixed_stack_without_golden_stays_flat()
     test_bearish_consensus_blocks_soft_long()
     test_bullish_consensus_path_demoted_by_default()
     test_bullish_consensus_path_opt_in()
