@@ -255,24 +255,48 @@ Placeholders:
 
 ---
 
-## Risk debaters (optional; not on default decide-stock path)
+## Risk panel + Portfolio Manager (optional; `--risk-panel` on decide-stock)
 
-Hard risk is primarily **code** (`default_policy`). Use these only if product enables a post-Trader risk panel.
+Hard risk is primarily **code** (`default_policy`). The LLM risk panel **reviews** the Trader; it does not replace pipeline filters.
+
+**Routing when risk_panel enabled:**
+After Trader → Risk Aggressive → Risk Conservative → Risk Neutral → **Portfolio Manager** (final FINAL TRANSACTION PROPOSAL + JSON).
 
 ```
-SYSTEM — {Aggressive|Conservative|Neutral} Risk Analyst
-Debate the trader’s proposal using only injected numbers.
-- Aggressive: upside if risks are already priced in policy size.
-- Conservative: drawdown, VaR, Bear regime; prefer cut/flat when flags fire.
-- Neutral: consistency with dual_recommendation and policy_hint.
-
-Placeholders:
-{trader_proposal}
-{quantitative_signals_json}
-{dual_recommendation}
-{policy_hint}
-{debate_history}
+SYSTEM — Risk Analyst (Aggressive)
+Prefix: "Risk Analyst (Aggressive):"
+- Argue maintain/expand size only if policy already cut elevated VaR and structure is constructive.
+- Vote: APPROVE | CUT | FLAT at end.
+Placeholders: {trader_proposal} {dual_recommendation} {policy_hint} {quantitative_signals_json}
+{debate_history} {research_plan} {decision_memory} {overall_score}
 ```
+
+```
+SYSTEM — Risk Analyst (Conservative)
+Prefix: "Risk Analyst (Conservative):"
+- Emphasize drawdown, VaR ladder, Bear, death cross, memory cooldowns; prefer CUT/FLAT.
+- Vote: APPROVE | CUT | FLAT at end.
+Placeholders: same as Aggressive (+ {risk_aggressive_last})
+```
+
+```
+SYSTEM — Risk Analyst (Neutral)
+Prefix: "Risk Analyst (Neutral):"
+- Consistency referee vs dual_recommendation / policy_hint and other risk votes.
+- Vote: APPROVE | CUT | FLAT at end.
+Placeholders: same (+ {risk_aggressive_last} {risk_conservative_last})
+```
+
+```
+SYSTEM — Portfolio Manager
+You speak last. Weigh Trader + risk votes. policy_hint Execute wins over Research BUY.
+Emit FINAL TRANSACTION PROPOSAL + full decision JSON (include risk_panel, risk_votes).
+Placeholders: {trader_proposal} {research_plan} {debate_history} {dual_recommendation}
+{policy_hint} {quantitative_signals_json} {risk_aggressive_last} {risk_conservative_last}
+{risk_neutral_last} {debate_path} {debate_rounds} {early_stop} {decision_memory}
+```
+
+Agents: `.grok/agents/stock-risk-*.md`, `stock-portfolio-manager.md`.
 
 ---
 

@@ -38,13 +38,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     handoff = args.handoff
     if handoff and not os.path.isabs(handoff):
         handoff = os.path.join(root, handoff)
-    meta = {"profile": args.profile}
+    meta = {"profile": args.profile, "risk_panel": bool(getattr(args, "risk_panel", False))}
     if handoff and os.path.exists(handoff):
         try:
             with open(handoff) as f:
                 h = json.load(f)
             meta["overall_score"] = (h.get("scores") or {}).get("overall") or h.get("overall_score")
             meta["policy_hint"] = h.get("policy_hint")
+            meta["dual_recommendation"] = h.get("dual_recommendation")
         except Exception as e:
             print(f"Warning: could not read handoff: {e}", file=sys.stderr)
     sess = DebateSession(
@@ -122,6 +123,11 @@ def main() -> int:
     i.add_argument("--rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     i.add_argument("--handoff", default=None, help="Path to handoff JSON")
     i.add_argument("--profile", default="Balanced")
+    i.add_argument(
+        "--risk-panel",
+        action="store_true",
+        help="After Trader, run Aggressive/Conservative/Neutral Risk + Portfolio Manager",
+    )
     i.add_argument("--out", default=None, help="Output path")
     i.set_defaults(func=cmd_init)
 
@@ -135,7 +141,21 @@ def main() -> int:
 
     a = sub.add_parser("append", help="Append a turn (text/--file/stdin)")
     a.add_argument("path")
-    a.add_argument("--role", required=True, choices=["bull", "bear", "manager", "trader", "system"])
+    a.add_argument(
+        "--role",
+        required=True,
+        choices=[
+            "bull",
+            "bear",
+            "manager",
+            "trader",
+            "system",
+            "risk_aggressive",
+            "risk_conservative",
+            "risk_neutral",
+            "portfolio",
+        ],
+    )
     a.add_argument("--round", type=int, default=None)
     a.add_argument("--file", default=None)
     a.add_argument("--text", default=None)

@@ -67,11 +67,27 @@ python scripts/debate_session.py init TICKER --rounds 2 --handoff decisions/hand
    3. **stock-trader** with manager plan + dual + policy_hint  
    4. `append --role trader`
 
+   **Optional risk panel** (user says `--risk-panel` / “with risk panel”):
+
+```bash
+python scripts/debate_session.py init TICKER --rounds 2 --risk-panel --handoff decisions/handoff_TICKER.json
+```
+
+   After Trader, `next` continues:
+   1. **stock-risk-aggressive** → `append --role risk_aggressive`  
+   2. **stock-risk-conservative** → `append --role risk_conservative`  
+   3. **stock-risk-neutral** → `append --role risk_neutral`  
+   4. **stock-portfolio-manager** → `append --role portfolio`  
+   Portfolio Manager emits the **authoritative** FINAL TRANSACTION PROPOSAL + JSON  
+   (Trader proposal becomes an input, not the last word).
+
+   Without risk panel, Trader JSON is final (after policy cross-check).
+
    Prefer **spawning** `.grok/agents/stock-*.md` as separate role invocations when the harness supports it.
 
 7. **Validate** decision JSON against required fields (`ticker`, `action`, `conviction`, `rationale`).  
-   Prefer full schema: `policy_action`, `policy_conflict`, `debate_path`, `debate_rounds`, `early_stop`, `pipeline_refs`, `schema_version`, `overall_score`, `stop_price`, `suggested_risk_pct`.
-8. **Policy cross-check:** if `policy_hint.action` is `flat` and Trader says long/BUY → force `policy_conflict: true`, warn user, prefer flat unless user overrides.
+   Prefer full schema: `policy_action`, `policy_conflict`, `debate_path`, `debate_rounds`, `early_stop`, `pipeline_refs`, `schema_version`, `overall_score`, `stop_price`, `suggested_risk_pct`, and if risk panel: `risk_panel`, `risk_votes`.
+8. **Policy cross-check:** if `policy_hint.action` is `flat` and final says long/BUY → force `policy_conflict: true`, warn user, prefer flat unless user overrides.
 9. **Persist** `decisions/live_TICKER_<timestamp>.json` with debate path + dual snapshot.
 
 ## Multi-turn rules (orchestrator)
@@ -87,7 +103,8 @@ python scripts/debate_session.py init TICKER --rounds 2 --handoff decisions/hand
 | Cross-ticker | Banned unless in handoff |
 | Prefixes | `Bull Analyst:` / `Bear Analyst:` |
 | Early stop | Mutual Execute concession after round 1 → Manager |
-| No tools mid-debate | Bull/Bear/Manager: injected text only |
+| Risk panel | Opt-in: Aggressive → Conservative → Neutral → Portfolio Manager |
+| No tools mid-debate | Debaters use injected text only |
 
 ## Integrity failures
 
@@ -102,7 +119,7 @@ python scripts/debate_session.py init TICKER --rounds 2 --handoff decisions/hand
 
 ## Related
 
-- Agents: `.grok/agents/stock-*.md`
+- Agents: `.grok/agents/stock-*.md` (includes risk-* and portfolio-manager)
 - Static cards: `scripts/agents/PROMPTS.md`
 - Debate CLI: `scripts/debate_session.py`, `scripts/agents/debate.py`
 - Schema: `scripts/agents/decision_schema.py`

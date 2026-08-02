@@ -24,8 +24,9 @@ def test_round_robin_and_complete():
     assert s.debate_complete()
     assert s.next_speaker() == "manager"
     s.append_turn("manager", "## Recommendation\nHOLD\n")
-    assert s.next_speaker() is None
+    assert s.next_speaker() == "trader"
     s.append_turn("trader", "FINAL TRANSACTION PROPOSAL: **HOLD**")
+    assert s.next_speaker() is None  # no risk panel
     s.set_final_decision({"ticker": "AAPL", "action": "flat", "conviction": "Medium", "rationale": "mixed"})
     assert s.status == "closed"
     hist = s.history_text()
@@ -56,8 +57,32 @@ def test_extract_prefix():
     assert extract_role_prefix("plain") is None
 
 
+def test_risk_panel_routing():
+    s = DebateSession("LLY", max_rounds=1, meta={"risk_panel": True})
+    assert s.risk_panel is True
+    s.append_turn("bull", "Bull Analyst: long case.")
+    s.append_turn("bear", "Bear Analyst: caution.")
+    assert s.next_speaker() == "manager"
+    s.append_turn("manager", "## Recommendation\nBUY\n")
+    assert s.next_speaker() == "trader"
+    s.append_turn("trader", "FINAL TRANSACTION PROPOSAL: **BUY**")
+    assert s.next_speaker() == "risk_aggressive"
+    s.append_turn("risk_aggressive", "Risk Analyst (Aggressive): Risk vote: APPROVE")
+    assert s.next_speaker() == "risk_conservative"
+    s.append_turn("risk_conservative", "Risk Analyst (Conservative): Risk vote: CUT")
+    assert s.next_speaker() == "risk_neutral"
+    s.append_turn("risk_neutral", "Risk Analyst (Neutral): Risk vote: CUT")
+    assert s.next_speaker() == "portfolio"
+    s.append_turn("portfolio", "FINAL TRANSACTION PROPOSAL: **BUY**")
+    assert s.next_speaker() is None
+    assert s.status == "portfolio"
+    hist = s.history_text()
+    assert "Risk Analyst (Aggressive)" in hist and "Portfolio Manager" in hist
+
+
 if __name__ == "__main__":
     test_round_robin_and_complete()
     test_save_load_roundtrip()
     test_extract_prefix()
+    test_risk_panel_routing()
     print("All debate session tests passed.")

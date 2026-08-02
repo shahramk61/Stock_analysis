@@ -16,7 +16,57 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 DEFAULT_MAX_ROUNDS = 2  # each round = Bull turn + Bear turn
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+
+# Post-trader risk panel (optional)
+RISK_PANEL_ROLES = (
+    "risk_aggressive",
+    "risk_conservative",
+    "risk_neutral",
+    "portfolio",
+)
+
+ROLE_ALIASES = {
+    "bull analyst": "bull",
+    "bull_researcher": "bull",
+    "bear analyst": "bear",
+    "bear_researcher": "bear",
+    "research manager": "manager",
+    "risk aggressive": "risk_aggressive",
+    "risk-aggressive": "risk_aggressive",
+    "aggressive": "risk_aggressive",
+    "risk conservative": "risk_conservative",
+    "risk-conservative": "risk_conservative",
+    "conservative": "risk_conservative",
+    "risk neutral": "risk_neutral",
+    "risk-neutral": "risk_neutral",
+    "neutral": "risk_neutral",
+    "portfolio manager": "portfolio",
+    "fund manager": "portfolio",
+}
+
+VALID_ROLES = frozenset(
+    {
+        "bull",
+        "bear",
+        "manager",
+        "trader",
+        "system",
+        *RISK_PANEL_ROLES,
+    }
+)
+
+ROLE_LABELS = {
+    "bull": "Bull Analyst",
+    "bear": "Bear Analyst",
+    "manager": "Research Manager",
+    "trader": "Trader",
+    "system": "System",
+    "risk_aggressive": "Risk Analyst (Aggressive)",
+    "risk_conservative": "Risk Analyst (Conservative)",
+    "risk_neutral": "Risk Analyst (Neutral)",
+    "portfolio": "Portfolio Manager",
+}
 
 
 def _now_iso() -> str:
@@ -51,8 +101,11 @@ class DebateSession:
         self.turns: List[Dict[str, Any]] = []
         self.manager_plan: Optional[str] = None
         self.trader_proposal: Optional[str] = None
+        self.risk_notes: Dict[str, str] = {}
+        self.portfolio_decision: Optional[str] = None
         self.final_decision: Optional[Dict[str, Any]] = None
-        self.status: str = "open"  # open | debating | manager | trader | closed
+        self.status: str = "open"  # open | debating | manager | trader | risk_panel | portfolio | closed
+        self.risk_panel: bool = bool(self.meta.get("risk_panel", False))
 
     # ── mutation ────────────────────────────────────────────────────────────
 
@@ -63,15 +116,16 @@ class DebateSession:
         round_num: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Append a speaker turn. role: bull | bear | manager | trader | system
+        Append a speaker turn.
+
+        Roles: bull | bear | manager | trader | system |
+               risk_aggressive | risk_conservative | risk_neutral | portfolio
         round_num: 1-based for bull/bear; auto-inferred if omitted.
         """
-        role_n = str(role or "").strip().lower()
-        if role_n in ("bull analyst", "bull_researcher"):
-            role_n = "bull"
-        if role_n in ("bear analyst", "bear_researcher"):
-            role_n = "bear"
-        if role_n not in ("bull", "bear", "manager", "trader", "system"):
+        role_n = str(role or "").strip().lower().replace("-", "_")
+        role_n = ROLE_ALIASES.get(role_n, role_n)
+        # also map "risk_aggressive" style already normalized
+        if role_n not in VALID_ROLES:
             raise ValueError(f"invalid debate role: {role!r}")
 
         text = (content or "").strip()
@@ -87,7 +141,7 @@ class DebateSession:
                     f"round_num {round_num} out of range 1..{self.max_rounds}"
                 )
         else:
-            round_num = round_num  # may be None for manager/trader
+            round_num = round_num  # may be None for manager/trader/risk/portfolio
 
         turn = {
             "seq": len(self.turns) + 1,
@@ -106,6 +160,12 @@ class DebateSession:
         elif role_n == "trader":
             self.trader_proposal = text
             self.status = "trader"
+        elif role_n in ("risk_aggressive", "risk_conservative", "risk_neutral"):
+            self.risk_notes[role_n] = text
+            self.status = "risk_panel"
+        elif role_n == "portfolio":
+            self.portfolio_decision = text
+            self.status = "portfolio"
         return turn
 
     def set_final_decision(self, decision: Dict[str, Any]) -> None:
@@ -138,26 +198,42 @@ class DebateSession:
     def debate_complete(self) -> bool:
         return self.completed_rounds() >= self.max_rounds
 
+    def _has_role(self, role: str) -> bool:
+        return any(t.get("role") == role for t in self.turns)
+
     def next_speaker(self) -> Optional[str]:
         """
-        Who should speak next in the bull/bear phase.
-        Returns 'bull' | 'bear' | 'manager' | None (if already past debate).
+        Who should speak next in the full decide-stock pipeline.
+
+        Returns bull | bear | manager | trader |
+                risk_aggressive | risk_conservative | risk_neutral | portfolio | None
         """
-        if self.status in ("manager", "trader", "closed"):
+        if self.status == "closed":
             return None
-        if self.debate_complete():
+        if not self.debate_complete():
+            for r in range(1, self.max_rounds + 1):
+                roles = {
+                    t["role"]
+                    for t in self.turns
+                    if t.get("round") == r and t["role"] in ("bull", "bear")
+                }
+                if "bull" not in roles:
+                    return "bull"
+                if "bear" not in roles:
+                    return "bear"
             return "manager"
-        # Find first incomplete round
-        for r in range(1, self.max_rounds + 1):
-            roles = {t["role"] for t in self.turns if t.get("round") == r and t["role"] in ("bull", "bear")}
-            if "bull" not in roles:
-                return "bull"
-            if "bear" not in roles:
-                return "bear"
-        return "manager"
+        if not self._has_role("manager"):
+            return "manager"
+        if not self._has_role("trader"):
+            return "trader"
+        if self.risk_panel:
+            for r in RISK_PANEL_ROLES:
+                if not self._has_role(r):
+                    return r
+        return None
 
     def last_argument(self, role: str) -> Optional[str]:
-        role_n = role.lower()
+        role_n = ROLE_ALIASES.get(str(role or "").strip().lower().replace("-", "_"), str(role or "").lower())
         for t in reversed(self.turns):
             if t["role"] == role_n:
                 return t["content"]
@@ -169,17 +245,12 @@ class DebateSession:
             return "(no debate history yet)"
         lines: List[str] = [
             f"# Debate transcript — {self.ticker}",
-            f"max_rounds={self.max_rounds} completed={self.completed_rounds()} status={self.status}",
+            f"max_rounds={self.max_rounds} completed={self.completed_rounds()} "
+            f"status={self.status} risk_panel={self.risk_panel}",
             "",
         ]
         for t in self.turns:
-            label = {
-                "bull": "Bull Analyst",
-                "bear": "Bear Analyst",
-                "manager": "Research Manager",
-                "trader": "Trader",
-                "system": "System",
-            }.get(t["role"], t["role"])
+            label = ROLE_LABELS.get(t["role"], t["role"])
             rnd = f" [round {t['round']}]" if t.get("round") else ""
             lines.append(f"### {label}{rnd} (seq {t['seq']})")
             lines.append(t["content"].rstrip())
@@ -200,43 +271,60 @@ class DebateSession:
             "debate_history": self.history_text(),
             "bull_last_argument": self.last_argument("bull"),
             "bear_last_argument": self.last_argument("bear"),
+            "trader_proposal": self.trader_proposal or self.last_argument("trader"),
+            "manager_plan": self.manager_plan or self.last_argument("manager"),
+            "risk_aggressive_last": self.last_argument("risk_aggressive"),
+            "risk_conservative_last": self.last_argument("risk_conservative"),
+            "risk_neutral_last": self.last_argument("risk_neutral"),
+            "risk_panel": self.risk_panel,
             "status": self.status,
         }
 
     # ── serialization ───────────────────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
+        meta = dict(self.meta)
+        meta["risk_panel"] = self.risk_panel
         return {
             "schema_version": SCHEMA_VERSION,
             "ticker": self.ticker,
             "max_rounds": self.max_rounds,
             "handoff_path": self.handoff_path,
-            "meta": self.meta,
+            "meta": meta,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "status": self.status,
+            "risk_panel": self.risk_panel,
             "completed_rounds": self.completed_rounds(),
             "turns": list(self.turns),
             "manager_plan": self.manager_plan,
             "trader_proposal": self.trader_proposal,
+            "risk_notes": dict(self.risk_notes),
+            "portfolio_decision": self.portfolio_decision,
             "final_decision": self.final_decision,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DebateSession":
+        meta = dict(data.get("meta") or {})
+        if "risk_panel" in data and "risk_panel" not in meta:
+            meta["risk_panel"] = data.get("risk_panel")
         sess = cls(
             ticker=data.get("ticker") or "UNKNOWN",
             max_rounds=int(data.get("max_rounds") or DEFAULT_MAX_ROUNDS),
             handoff_path=data.get("handoff_path"),
-            meta=data.get("meta") or {},
+            meta=meta,
         )
         sess.created_at = data.get("created_at") or sess.created_at
         sess.updated_at = data.get("updated_at") or sess.updated_at
         sess.turns = list(data.get("turns") or [])
         sess.manager_plan = data.get("manager_plan")
         sess.trader_proposal = data.get("trader_proposal")
+        sess.risk_notes = dict(data.get("risk_notes") or {})
+        sess.portfolio_decision = data.get("portfolio_decision")
         sess.final_decision = data.get("final_decision")
         sess.status = data.get("status") or "open"
+        sess.risk_panel = bool(meta.get("risk_panel", data.get("risk_panel", False)))
         return sess
 
     def save(self, path: str) -> str:

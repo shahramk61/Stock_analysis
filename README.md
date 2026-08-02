@@ -218,7 +218,8 @@ Generated locally (usually **not** committed): `signals_*.json`, `backtest_decis
 | `/analyze-stock TICKER` | Pipeline-backed analysis |
 | `/watchlist …` | Rank tickers |
 | `/decide-stock TICKER` | Multi-turn debate + final proposal (dual Research/Execute) |
-| `.grok/agents/stock-*.md` | Bull, Bear, Manager, Trader, Quant reader — integrity + dual labels |
+| `/decide-stock TICKER --risk-panel` | + Risk Aggressive/Conservative/Neutral + Portfolio Manager |
+| `.grok/agents/stock-*.md` | Bull, Bear, Manager, Trader, Risk panel, Portfolio Manager, Quant |
 
 See [docs/grok-hooks.md](docs/grok-hooks.md). Primary path does **not** use the public xAI HTTP API.
 

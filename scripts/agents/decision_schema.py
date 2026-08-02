@@ -49,6 +49,8 @@ DECISION_SCHEMA: Dict[str, Any] = {
         "debate_rounds": {"type": ["integer", "null"]},
         "debate_path": {"type": ["string", "null"]},
         "early_stop": {"type": ["boolean", "null"]},
+        "risk_panel": {"type": ["boolean", "null"]},
+        "risk_votes": {"type": ["object", "null"]},
     },
 }
 

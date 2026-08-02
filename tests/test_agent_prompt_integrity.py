@@ -56,6 +56,21 @@ def test_stock_decision_skill_requires_sequential_and_early_stop():
     assert "early_stop" in text or "Early stop" in text
     assert "dual_recommendation" in text
     assert "policy_conflict" in text
+    assert "risk-panel" in text or "risk_panel" in text
+    assert "portfolio-manager" in text or "Portfolio Manager" in text
+
+
+def test_risk_and_portfolio_agents_exist():
+    for name in (
+        "stock-risk-aggressive.md",
+        "stock-risk-conservative.md",
+        "stock-risk-neutral.md",
+        "stock-portfolio-manager.md",
+    ):
+        text = _read(f".grok/agents/{name}")
+        assert "dual_recommendation" in text or "Dual labels" in text, name
+        assert "policy_hint" in text, name
+        assert "invent" in text.lower(), name
 
 
 if __name__ == "__main__":
@@ -63,4 +78,5 @@ if __name__ == "__main__":
     test_grok_agents_have_dual_labels()
     test_trader_json_schema_fields_documented()
     test_stock_decision_skill_requires_sequential_and_early_stop()
+    test_risk_and_portfolio_agents_exist()
     print("All agent prompt integrity tests passed.")
