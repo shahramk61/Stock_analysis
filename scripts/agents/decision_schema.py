@@ -46,6 +46,9 @@ DECISION_SCHEMA: Dict[str, Any] = {
         "backend": {"type": "string"},
         "model": {"type": "string"},
         "schema_version": {"type": "string"},
+        "debate_rounds": {"type": ["integer", "null"]},
+        "debate_path": {"type": ["string", "null"]},
+        "early_stop": {"type": ["boolean", "null"]},
     },
 }
 
@@ -180,18 +183,21 @@ def build_handoff_bundle(
     quant: Optional[Dict[str, Any]] = None,
     memory_text: str = "",
     policy_hint: Optional[Dict[str, Any]] = None,
+    dual_recommendation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Frozen facts package injected into Grok agents (measurement backend)."""
     return {
         "ticker": ticker.upper(),
         "backend_note": (
             "Numbers below come from the local Python pipeline. "
-            "Do not invent prices, scores, VaR, or fundamentals."
+            "Do not invent prices, scores, VaR, or fundamentals. "
+            "Research BUY is not an order — use policy_hint / dual_recommendation for execution."
         ),
         "signals_path": signals_path,
         "signals": signals or {},
         "quantitative": quant or {},
         "decision_memory": memory_text or "",
         "policy_hint": policy_hint or {},
+        "dual_recommendation": dual_recommendation or {},
         "schema_version": SCHEMA_VERSION,
     }

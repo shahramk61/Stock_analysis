@@ -1,116 +1,171 @@
-# Stock Analysis — Python Pipeline & Agent Skill (v5.0)
+# Stock Analysis
 
-Independent, data-driven stock analysis: weighted scoring, GPU-accelerated ML signals, Quantitative Analyst reports, backtesting, and structured JSON for trading-bot integration.
+Local Python pipeline for **data-driven equity scoring**, **risk policy**, **walk-forward backtests**, and **Grok Build multi-agent decisions**.
 
-**This is your project** — a standalone Python codebase first. Optional agent skill packages live under `.grok/` for Grok Build (and compatible harnesses).
+| Layer | What runs where |
+|--------|------------------|
+| **Measurement** | Your machine — `scripts/` (yfinance, scores, VaR, journal) |
+| **Decisions** | Grok Build session — Bull/Bear/Manager/Trader (subscription; **no** `XAI_API_KEY`) |
 
-**Canonical code** lives in `scripts/` (signals, scoring, reports, dashboard, backtester, quant agent).
+**Canonical code:** `scripts/` only. Do not invent prices, scores, or risk metrics — run the pipeline.
+
+---
+
+## Quick start (new team member)
+
+```bash
+git clone https://github.com/shahramk61/Stock_analysis.git
+cd Stock_analysis
+
+# Python 3.11+ recommended
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -r requirements.txt
+
+# Optional GPU (PyTorch CUDA) — see comments in requirements.txt
+# Optional: open this folder in Grok Build for /decide-stock and project agents
+```
+
+**Smoke checks**
+
+```bash
+# Unit tests (no market data network for most; some signal tests may download)
+python tests/test_recommendation_dual.py
+python tests/test_policy_leverage.py
+python tests/test_backtest_engine.py
+python tests/test_debate_session.py
+
+# One-ticker analysis (needs network for yfinance)
+python scripts/analyze.py AAPL --output both --profile Balanced
+
+# Decision handoff (facts only; forecasts OFF by default)
+python scripts/prepare_decision_handoff.py AAPL --profile Balanced --fast
+```
+
+Full onboarding notes: **[docs/ONBOARDING.md](docs/ONBOARDING.md)** · contributing: **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ---
 
 ## Features
 
-- **Configurable investor profiles** — Balanced, Value, Growth, Momentum (adjusts pillar weights automatically)
-- **6-pillar weighted scoring** — Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 composite; Risk is scored, not cosmetic)
-- **20+ quantitative signals** — DCF, Monte Carlo VaR/CVaR, RSI/MACD, SMA/ADX trend pack, LSTM, Chronos-2, multi-horizon ensemble, FinBERT, X/social, etc.
-- **Quantitative Analyst agent** — structured report + conviction + debate contribution
-- **Backtester** — point-in-time replay, policy, equity curve, exportable decisions
-- **Risk management** — position sizing hooks, stop hints, auto-flagging
-- **Multi-horizon forecasts** — 5d / 10d / 15d / 20d / 50d with median and weighted ensembles
-- **Streamlit dashboard** — interactive exploration with Plotly charts
-- **JSON signal export** — `signals_TICKER.json` for trading-bot consumption
-- **Agent commands** — `/analyze-stock`, `/watchlist` (via `.grok/commands/`)
+- **6-pillar scores** — Fundamentals, Technicals, Valuation, Sentiment, ESG/Quality, **Risk**
+- **Profiles** — Balanced, Value, Growth, Momentum
+- **Signals** — DCF, Monte Carlo VaR/CVaR, RSI/MACD, SMA/ADX, regime (HMM), GARCH/ATR, liquidity, FinBERT, optional multi-horizon ensembles
+- **Dual recommendations** — **Research** (score bands) vs **Execute** (`policy_hint`); Research BUY is **not** a trade ticket
+- **Policy** — hard VaR / Bear regime filters, trend leverage, memory cooldowns; multi-horizon Path C **opt-in only**
+- **Backtester** — walk-forward, next-open fill, stop-on-low, flat exits, optional **session** (same-day open→close)
+- **Journal** — episodic runs + Abzu-style rules under `journal/`
+- **Grok multi-turn debate** — Bull ↔ Bear rounds → Manager → Trader (`/decide-stock`)
+- **Streamlit dashboard** — `streamlit run scripts/dashboard.py`
 
 ---
 
-## Installation
+## Defaults that matter (read this)
 
-```bash
-git clone https://github.com/shahramk61/Stock_analysis.git
-cd Stock_analysis
-python -m pip install -r requirements.txt
-```
+| Setting | Default | Opt-in flag |
+|---------|---------|-------------|
+| Neural multi-horizon forecasts | **OFF** | `--forecasts` |
+| Path C multi-horizon **entry** leverage | **OFF** | `--multi-horizon-entry` |
+| Decision memory (stop cooldown / loss streak) | **ON** | `--no-memory` to disable |
+| Fast handoff/backtest | FinBERT may still run; skips full ensemble retrain | `--fast` |
 
-Open the repo in **Grok Build** from this directory — project skills and agents under `.grok/` load automatically.
+Why: a GME feature audit showed forecasts did not improve fills and could confuse agents with Bullish language under a flat policy. Keep models for research; do not treat them as the trade driver unless you opt in and calibrate.
 
-### Agent backend = Grok Build (your subscription)
-
-| Layer | Backend |
-|-------|---------|
-| Scores, signals, backtest, journal | Local Python (`scripts/`) |
-| Multi-agent **decisions** (Bull/Bear/Manager/Trader) | **This Grok Build session** (your plan/subscription — no API key) |
-
-You do **not** need `XAI_API_KEY`. Reasoning and trade proposals run as Grok agents/skills inside Grok Build. Python only measures (prices, scores, risk).
-
-```bash
-# 1) Freeze pipeline facts (local, no LLM)
-python scripts/prepare_decision_handoff.py AAPL --profile Balanced --fast
-
-# 2) In this Grok Build chat
-/decide-stock AAPL
-```
-
-Future automation without leaving Grok Build: see [docs/grok-hooks.md](docs/grok-hooks.md).
+**Always prefer Execute / `policy_hint` over text BUY** when they disagree (`policy_conflict`).
 
 ---
 
-## Python Pipeline Usage
+## Common commands
+
+### Analysis
 
 ```bash
-# Full analysis (report + JSON)
 python scripts/analyze.py AAPL --output both --profile Balanced
-
-# JSON only (trading bot)
-python scripts/analyze.py AAPL --output json --profile Growth
-
-# Interactive dashboard
+python scripts/analyze.py MSFT --output json --profile Growth
 streamlit run scripts/dashboard.py
+```
 
-# Quantitative Analyst smoke test
+### Decision handoff + multi-agent (Grok Build)
+
+```bash
+# 1) Freeze pipeline facts (local)
+python scripts/prepare_decision_handoff.py TSLA --profile Balanced --fast
+
+# 2) In Grok Build chat (this repo open)
+/decide-stock TSLA
+# optional: /decide-stock GME --rounds 2
+```
+
+Helpers:
+
+```bash
+python scripts/debate_session.py init AAPL --rounds 2 --handoff decisions/handoff_AAPL.json
+python scripts/debate_session.py status decisions/debate_AAPL_*.json
+```
+
+### Backtest
+
+```bash
+# Swing (default): signal at close → next open; stop on low; flat next open
+python scripts/backtest.py AAPL --start 2026-07-01 --end 2026-08-02 --fast --export --journal
+
+# Session mode: same-day open → close (daily bars)
+python scripts/backtest.py AAPL --session --rebalance-days 1 --fast --export
+
+# Opt-in forecasts / Path C (slow; research)
+python scripts/backtest.py GME --start 2026-07-01 --end 2026-08-02 --forecasts --export
+python scripts/backtest.py GME --start 2026-07-01 --end 2026-08-02 --forecasts --multi-horizon-entry --export
+```
+
+### Tests
+
+```bash
+python tests/test_recommendation_dual.py
+python tests/test_policy_leverage.py
+python tests/test_gme_forecast_policy_audit.py
+python tests/test_backtest_engine.py
+python tests/test_debate_session.py
+python tests/test_decision_memory.py
+python tests/test_no_lookahead.py
+python tests/test_quant_schema.py
+# Optional GPU quant smoke:
 python test_quant_analyst.py
-
-# Backtest (fast mode recommended) — next-open fill, daily stops, flat exits
-python scripts/backtest.py AAPL --start 2024-01-01 --end 2024-12-31 --fast --export --validate
-
-# No neural forecasts (regime / risk / technicals only)
-python scripts/backtest.py AAPL --start 2024-06-01 --fast --no-forecasts --export
 ```
-
-Backtest execution model: signals at decision **close** → fill next **open**; stop checked daily on **low**; **flat** exits next open; size cash-capped; BH on the test window only.
-
-Optional: `--dynamic-weights` for out-of-sample ensemble weighting (~2× slower).  
-Forecasts default to horizons **5d / 20d / 50d** for speed; full set available via code (`full_horizons=True`).
 
 ---
 
-## Agent Usage (Grok)
-
-### Analyze a single stock
+## Architecture (mental model)
 
 ```
-/analyze-stock AAPL
+yfinance / signals  →  score.calculate_pillars  →  quant conviction
+                              ↓
+                    default_policy (Execute)
+                              ↓
+              Research label (score)  |  policy_hint (trade intent)
+                              ↓
+         handoff JSON  →  Grok Bull/Bear/Manager/Trader  →  live decision
+                              ↓
+              backtest engine (walk-forward replay of same policy)
 ```
 
-### Compare multiple stocks
-
-```
-/analyze-stock AAPL MSFT NVDA
-```
-
-### Rank a watchlist
-
-```
-/watchlist AAPL MSFT NVDA GOOGL META AMZN
-```
-
-You can also ask in natural language: *“Analyze NVDA with the Growth profile”* — the `stock-analysis` skill will guide the run.
+| Path | Role |
+|------|------|
+| `scripts/stock_signals.py` | Quantitative signals |
+| `scripts/score.py` | Pillars + overall score |
+| `scripts/recommendation.py` | Dual Research / Execute labels |
+| `scripts/backtest/policy.py` | `default_policy`, `choose_entry` |
+| `scripts/backtest/engine.py` | Walk-forward execution |
+| `scripts/prepare_decision_handoff.py` | Frozen facts for agents |
+| `scripts/agents/` | Quant node, debate helpers, schemas, PROMPTS |
+| `.grok/` | Grok skills, commands, agent cards |
 
 ---
 
-## Scoring Model
+## Scoring (Research labels)
 
 | Pillar | Balanced | Value | Growth | Momentum |
-|---|---|---|---|---|
+|--------|----------|-------|--------|----------|
 | Fundamentals | 25% | 20% | 30% | 15% |
 | Technicals | 20% | 15% | 25% | 30% |
 | Valuation | 20% | 30% | 15% | 15% |
@@ -118,46 +173,65 @@ You can also ask in natural language: *“Analyze NVDA with the Growth profile�
 | ESG | 10% | 10% | 5% | 10% |
 | Risk | 15% | 15% | 15% | 15% |
 
-Risk uses MC VaR, GARCH vol ratio, ATR clustering, Altman zone, and HMM regime.
+| Score | Research label |
+|-------|----------------|
+| 75–100 | STRONG_BUY |
+| 60–74 | BUY |
+| 50–59 | HOLD |
+| 35–49 | CAUTION |
+| 0–34 | SELL |
 
-| Score | Rating |
-|---|---|
-| 75–100 | Strong Buy |
-| 60–74 | Buy |
-| 50–59 | Hold/Watch |
-| 35–49 | Caution |
-| 0–34 | Avoid / Sell |
+Execute still applies VaR, Bear regime, conviction, and memory. Example dual line:
 
-Human reports and JSON export use the same recommendation bands.
+`Research BUY | Execute FLAT`
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-scripts/
-├── stock_signals.py      # Canonical signals (7-model ensemble, liquidity, etc.)
-├── analyze.py, score.py, report.py, dashboard.py
-├── backtest.py + backtest/   # Historical replay + policy + metrics
-└── agents/
-    ├── PROMPTS.md              # Static multi-agent role cards
-    └── quantitative_analyst/   # Quant node + JSON schema validators
-
-.grok/
-├── skills/stock-analysis/   # Agent skill (primary)
-└── commands/                # /analyze-stock, /watchlist
-
-SKILL.md, ROADMAP.md, requirements.txt
+Stock_analysis/
+├── scripts/                 # Canonical pipeline (edit here)
+│   ├── analyze.py, score.py, report.py, recommendation.py
+│   ├── backtest.py, backtest/{engine,policy,data,memory,metrics}.py
+│   ├── prepare_decision_handoff.py, debate_session.py
+│   ├── dashboard.py, fetch_data.py, montecarlo.py, dcf.py
+│   └── agents/              # Quant + debate schema + PROMPTS.md
+├── tests/                   # Unit / policy / backtest tests
+├── decisions/               # Handoffs, debates, audits (many gitignored)
+├── journal/                 # Memory rules + run dumps (runs/*.json ignored)
+├── docs/                    # ONBOARDING, grok-hooks
+├── .grok/                   # Grok Build skills, commands, agents
+├── requirements.txt
+├── CONTRIBUTING.md
+└── README.md
 ```
 
----
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for milestone status. Active focus: backtest validation before any live broker bridge.
+Generated locally (usually **not** committed): `signals_*.json`, `backtest_decisions_*.json`, `lightning_logs/`, `decisions/handoff_*.json`, `decisions/live_*.json`, `journal/runs/*.json`.
 
 ---
 
-## License
+## Grok Build usage
 
-MIT — see [LICENSE](LICENSE).
+| Command / skill | Purpose |
+|-----------------|---------|
+| `/analyze-stock TICKER` | Pipeline-backed analysis |
+| `/watchlist …` | Rank tickers |
+| `/decide-stock TICKER` | Multi-turn debate + final proposal |
+| `.grok/agents/stock-*.md` | Bull, Bear, Manager, Trader, Quant reader |
+
+See [docs/grok-hooks.md](docs/grok-hooks.md). Primary path does **not** use the public xAI HTTP API.
+
+---
+
+## Roadmap & license
+
+- Product plan: [ROADMAP.md](ROADMAP.md)  
+- Journal rules: [journal/README.md](journal/README.md)  
+- License: **MIT** — [LICENSE](LICENSE)
+
+---
+
+## Disclaimer
+
+This repository is for **research and education**. It is not investment advice. No live broker orders ship with the default stack. Past backtests do not guarantee future results. Always re-run the pipeline for current numbers.

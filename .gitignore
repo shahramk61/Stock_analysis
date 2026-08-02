@@ -6,8 +6,27 @@
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .venv/
+venv/
+.env
+.env.*
+!.env.example
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
 
 # PyTorch Lightning training logs
 lightning_logs/
@@ -18,14 +37,21 @@ signals_*.json
 # Forecast / model caches
 .cache/
 x_sentiment_*.json
+huggingface/
+*.pt
+*.ckpt
 
 # Episodic journal runs (keep rules/ docs; ignore bulky run dumps)
 journal/runs/*.json
+!journal/runs/.gitkeep
 
-# Live decision artifacts (handoffs may be regenerated)
+# Decision artifacts (regenerate via prepare_decision_handoff / debate / decide)
 decisions/live_*.json
+decisions/handoff_*.json
+decisions/debate_*.json
+!decisions/.gitkeep
 
-# Backtest artifacts (decisions, simulated trade logs)
+# Backtest artifacts
 backtest_decisions_*.json
 backtest_trade_log*.csv
 *.backtest.json
@@ -34,6 +60,9 @@ backtest_trade_log*.csv
 test_push.txt
 test_connector_push.txt
 
-# Ad-hoc snapshots (keep canonical reports via analyze.py)
+# Ad-hoc snapshots
 *_snapshot_*.md
 
+# Local notes / secrets
+*.local.md
+secrets/

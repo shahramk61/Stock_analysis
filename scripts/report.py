@@ -3,9 +3,11 @@ import json
 import os
 from datetime import datetime
 
+from recommendation import dual_recommendation, format_research_line, research_recommendation
+
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-def generate_report(data, scores, mc_result, profile):
+def generate_report(data, scores, mc_result, profile, policy_hint=None):
     ticker = data['ticker']
     price = data['current_price']
     
@@ -14,8 +16,26 @@ def generate_report(data, scores, mc_result, profile):
     print(f"{'='*80}\n")
     
     print(f"Overall Score : {scores['overall']}/100   |   Profile: {profile}")
-    rec = '🟢 STRONG BUY' if scores['overall'] >= 75 else '🟡 BUY' if scores['overall'] >= 60 else '🔴 HOLD/SELL'
-    print(f"Recommendation: {rec}")
+    ph = policy_hint if isinstance(policy_hint, dict) else {}
+    dual = dual_recommendation(
+        scores["overall"],
+        policy_action=ph.get("action"),
+        policy_conviction=ph.get("conviction"),
+        policy_rationale=ph.get("rationale"),
+        suggested_risk_pct=ph.get("suggested_risk_pct"),
+    )
+    print(f"Research      : {format_research_line(scores['overall'])}  (score bands only — not an order)")
+    if ph.get("action") is not None:
+        print(
+            f"Execute       : {dual.get('execution_label')}  "
+            f"(policy {ph.get('action')}, conv {ph.get('conviction')}, "
+            f"risk={float(ph.get('suggested_risk_pct') or 0)*100:.1f}%)"
+        )
+        print(f"Combined      : {dual.get('recommendation')}")
+        if dual.get("policy_conflict"):
+            print("⚠️  policy_conflict: Research is constructive but Execute is not LONG — trust Execute for sizing.")
+    else:
+        print(f"Recommendation: {format_research_line(scores['overall'])}  (run policy/handoff for Execute label)")
     print(
         f"Pillars — Fund {scores.get('fundamentals')} | Tech {scores.get('technicals')} | "
         f"Val {scores.get('valuation')} | Sent {scores.get('sentiment')} | "
@@ -186,21 +206,29 @@ def generate_report(data, scores, mc_result, profile):
     print(f"\n{'='*80}\n")
 
 
-def generate_json_report(data, scores, mc_result, profile):
+def generate_json_report(data, scores, mc_result, profile, policy_hint=None):
+    research = research_recommendation(scores["overall"])
+    ph = policy_hint if isinstance(policy_hint, dict) else {}
+    dual = dual_recommendation(
+        scores["overall"],
+        policy_action=ph.get("action"),
+        policy_conviction=ph.get("conviction"),
+        policy_rationale=ph.get("rationale"),
+        suggested_risk_pct=ph.get("suggested_risk_pct"),
+    )
     output = {
         "timestamp": datetime.now().isoformat(),
         "ticker": data['ticker'],
         "current_price": data['current_price'],
         "overall_score": scores['overall'],
         "profile": profile,
-        # Align with human report + README bands (was 70/50; text report uses 75/60)
-        "recommendation": (
-            "STRONG_BUY" if scores['overall'] >= 75 else
-            "BUY" if scores['overall'] >= 60 else
-            "HOLD" if scores['overall'] >= 50 else
-            "CAUTION" if scores['overall'] >= 35 else
-            "SELL"
-        ),
+        # Research = score bands only. Prefer dual recommendation when policy present.
+        "research_recommendation": research,
+        "recommendation": dual.get("recommendation") if ph.get("action") is not None else research,
+        "recommendation_note": dual.get("recommendation_note"),
+        "execution_action": dual.get("execution_action"),
+        "execution_label": dual.get("execution_label"),
+        "policy_conflict": dual.get("policy_conflict"),
         "pillars": {
             "fundamentals": scores['fundamentals'],
             "technicals": scores['technicals'],

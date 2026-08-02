@@ -1,13 +1,13 @@
 ---
 name: stock-analysis
 description: >
-  Analyze stocks with a 6-pillar weighted score, 20+ quantitative signals,
-  Monte Carlo risk, multi-horizon forecasts, Quantitative Analyst reports,
-  and optional backtests. Use when the user asks to analyze a ticker, rank a
-  watchlist, run stock signals, or backtest the agent policy.
+  Analyze stocks with a 6-pillar weighted score, quantitative signals,
+  Monte Carlo risk, optional multi-horizon forecasts, Quantitative Analyst
+  reports, dual Research/Execute labels, and walk-forward backtests. Use when
+  the user asks to analyze a ticker, rank a watchlist, decide-stock, or backtest.
 ---
 
-# Stock Analysis Skill v5.0
+# Stock Analysis Skill v5.1
 
 **Canonical code:** `scripts/` (never invent numbers — run the pipeline).
 
@@ -20,18 +20,31 @@ python scripts/analyze.py TICKER --profile [Balanced|Growth|Value|Momentum] --ou
 # Dashboard
 streamlit run scripts/dashboard.py
 
-# Quant analyst smoke test
-python test_quant_analyst.py
+# Decision handoff (forecasts OFF by default)
+python scripts/prepare_decision_handoff.py TICKER --profile Balanced --fast
 
-# Backtest
-python scripts/backtest.py TICKER --start YYYY-MM-DD --fast --export [--debate]
+# Backtest (forecasts OFF by default; Path C multi-h entry OFF)
+python scripts/backtest.py TICKER --start YYYY-MM-DD --fast --export
+# Opt-in research: --forecasts   Path C: --multi-horizon-entry   Session: --session
+
+# Quant smoke
+python test_quant_analyst.py
 ```
+
+## Dual labels
+
+| Label | Meaning |
+|-------|---------|
+| **Research** | Score bands (STRONG_BUY / BUY / HOLD / CAUTION / SELL) |
+| **Execute** | `policy_hint.action` (long / flat / short) after VaR, regime, conviction, memory |
+
+Never treat Research BUY as a trade when Execute is FLAT (`policy_conflict`).
 
 ## Profiles & scoring
 
 Pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 overall).
 
-| Score | Rating |
+| Score | Research rating |
 |---|---|
 | 75–100 | Strong Buy |
 | 60–74 | Buy |
@@ -42,11 +55,11 @@ Pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 over
 ## Agent workflow
 
 1. Confirm ticker(s) and optional profile (default **Balanced**).
-2. Prefer running `python scripts/analyze.py …` for live numbers.
-3. For multi-ticker ranking, score each then present a sorted table + Top 3.
-4. Cite real pipeline outputs only — no fabricated prices, scores, or fundamentals.
-5. For validation / paper trading research, use `scripts/backtest.py` with `--fast`.
-6. Multi-agent role cards: `scripts/agents/PROMPTS.md`. Quant schema: `schemas.py`.
+2. Prefer `python scripts/analyze.py …` or `prepare_decision_handoff.py` for live numbers.
+3. For decisions: handoff → multi-turn Bull/Bear → Manager → Trader (`/decide-stock`).
+4. Cite real pipeline outputs only.
+5. Backtests: `scripts/backtest.py` with `--fast` for routine work.
+6. Role cards: `scripts/agents/PROMPTS.md`. Schema: `scripts/agents/decision_schema.py`.
 
 ## Integrity failure modes
 
@@ -56,27 +69,28 @@ Pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk (0–100 over
 | Role drift (quant as bull/trader) | Quant = data provider only |
 | Weak risk surfacing | Always quote elevated VaR / Bear / distress Z |
 | Soft conviction language | Only High / Medium / Low |
-| Format drift | Require `quantitative_signals.schema_valid` |
+| Research BUY as order | Use Execute / policy_hint only |
 
 ## Key modules
 
 | Path | Role |
 |---|---|
-| `scripts/stock_signals.py` | All quantitative signals |
-| `scripts/score.py` | Pillar scoring |
+| `scripts/stock_signals.py` | Quantitative signals |
+| `scripts/score.py` | Pillar scoring (`use_forecasts` default False) |
+| `scripts/recommendation.py` | Dual Research / Execute labels |
 | `scripts/report.py` | Human + JSON reports |
-| `scripts/agents/quantitative_analyst/` | Quant Analyst agent |
-| `scripts/backtest/` | Point-in-time backtester |
+| `scripts/backtest/policy.py` | Entry policy (Path C opt-in) |
+| `scripts/backtest/` | Walk-forward engine |
+| `scripts/agents/quantitative_analyst/` | Quant Analyst node |
+| `.grok/` | Grok skills, commands, agents |
 
 ## Requirements
 
-See `requirements.txt` (yfinance, pandas, numpy, torch optional for GPU signals, streamlit/plotly for dashboard, arch/hmmlearn for regime/vol).
+See `requirements.txt`. Onboarding: `docs/ONBOARDING.md`.
 
-## Version notes (v5.0+)
+## Version notes (v5.1)
 
-- Unified pipeline under `scripts/`
-- Quantitative Analyst + structured conviction / debate contribution
-- Backtesting foundation (as-of hist, policy, metrics, CLI) + risk filters + position sizing
-- Risk pillar in overall score; RSI/MACD + SMA/ADX trend pack for agents
-- Faster multi-horizon defaults (5/20/50d, Chronos cache, LSTM early stop, score dedupe)
-- X/social sentiment hook for debates (`get_x_ticker_sentiment`)
+- Dual Research / Execute labels; handoff surfaces `policy_conflict`
+- Multi-horizon forecasts + Path C entry **opt-in** (default off)
+- Session backtest mode; multi-turn debate transcript helper
+- Grok Build subscription path for decisions (no XAI_API_KEY required)

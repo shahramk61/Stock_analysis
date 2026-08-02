@@ -124,15 +124,26 @@ def choose_entry(
     overall: float,
     q_conv: str,
     lev: Dict[str, Any],
+    *,
+    allow_multi_horizon_entry: bool = False,
 ) -> Tuple[Action, float, str]:
     """
     Multi-path entry. Returns (action, risk_pct, rationale) before hard risk filters.
+
+    Path C (multi-horizon consensus leverage) is **off by default** — forecasts are
+    research-only after the GME audit; opt in with allow_multi_horizon_entry=True.
     """
     conv = str(q_conv or "Medium")
-    # Path A: classic high-quality
-    if overall >= 70 and lev["consensus_bull"] and conv in ("High", "Medium"):
-        risk = 0.015 if conv == "High" else 0.01
-        return "long", risk, f"Score {overall} + Bullish consensus + {conv} conviction"
+    # Path A: classic high-quality (score + conviction; consensus only if multi-h entry enabled)
+    if overall >= 70 and conv in ("High", "Medium"):
+        if allow_multi_horizon_entry and lev["consensus_bull"]:
+            risk = 0.015 if conv == "High" else 0.01
+            return "long", risk, f"Score {overall} + Bullish consensus + {conv} conviction"
+        if not allow_multi_horizon_entry or not lev["consensus_bear"]:
+            # Without multi-h leverage: high score + Medium/High is enough if not bearish consensus
+            if not lev["consensus_bear"]:
+                risk = 0.012 if conv == "High" else 0.008
+                return "long", risk, f"Score {overall} + {conv} conviction (research multi-h not required)"
     if overall >= 60 and conv == "High" and not lev["consensus_bear"]:
         return "long", 0.01, f"Score {overall} + High conviction (no bearish consensus)"
 
@@ -151,9 +162,10 @@ def choose_entry(
             f"Score {overall} + bullish trend (stack={lev['stack']}) + {conv} conv",
         )
 
-    # Path C: multi-horizon consensus leverage (when forecasts present)
+    # Path C: multi-horizon consensus leverage — opt-in only (default demoted)
     if (
-        overall >= 54
+        allow_multi_horizon_entry
+        and overall >= 54
         and lev["consensus_bull"]
         and conv in ("High", "Medium")
         and not lev["trend_bear"]
@@ -211,12 +223,22 @@ def default_policy(
     profile: str = "Balanced",
     relaxed: bool = False,
     memory: Optional[Dict[str, Any]] = None,
+    execution_mode: str = "swing",
+    session_stop_pct: float = 0.015,
+    allow_multi_horizon_entry: bool = False,
 ) -> TradeSignal:
     """
-    Multi-signal decision policy: score + conviction + trend + consensus + news,
+    Multi-signal decision policy: score + conviction + trend (+ optional multi-h) + news,
     then hard VaR/Bear filters and memory cooldowns.
+
+    execution_mode:
+      - swing: multi-day holds, wider ATR/MC stops
+      - session: same-day open→close; tighter stops + slight risk haircut
+
+    allow_multi_horizon_entry: Path C multi-horizon leverage (default False — research-only).
     """
     del relaxed
+    session = str(execution_mode or "swing").lower() == "session"
     overall = float(scores.get("overall", 50.0))
     signals = scores.get("signals", {}) or {}
     if mc_risk and isinstance(mc_risk, dict):
@@ -238,7 +260,9 @@ def default_policy(
         # Slightly less aggressive Low clamp so mid-40s can still use trend paths with Medium quant
         q_conv = "Low"
 
-    action, risk, rationale = choose_entry(overall, q_conv, lev)
+    action, risk, rationale = choose_entry(
+        overall, q_conv, lev, allow_multi_horizon_entry=allow_multi_horizon_entry
+    )
 
     # ── Hard risk filters ───────────────────────────────────────────────────
     var95 = lev["var95"]
@@ -263,6 +287,11 @@ def default_policy(
         if action == "long" and lev["news_bear"]:
             risk = max(0.002, risk * 0.7)
             rationale = f"{rationale} | size cut: bearish FinBERT"
+        # Session: avoid weak mid-score longs (round-trip cost sensitivity)
+        if session and action == "long" and overall < 55 and not lev["trend_bull_strong"]:
+            action = "flat"
+            risk = 0.0
+            rationale = f"{rationale} | session filter: score<{55} without strong trend → flat"
 
     multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h") or {}
     if action == "long" and isinstance(multi, dict):
@@ -293,15 +322,24 @@ def default_policy(
     if not isinstance(mcr, dict):
         mcr = {}
     stop = None
-    if mcr.get("stop_price"):
+    if session and current_price > 0:
+        # Tight open→close stop: floor at session_stop_pct, widen with ATR up to 3%
+        atr_stop_pct = max(
+            session_stop_pct,
+            min(0.03, (atr_pct / 100.0) if atr_pct > 0 else session_stop_pct),
+        )
+        stop = current_price * (1.0 - atr_stop_pct)
+        if action == "long":
+            rationale = f"{rationale} | session stop {atr_stop_pct * 100:.1f}%"
+    elif mcr.get("stop_price"):
         stop = mcr.get("stop_price")
     elif atr_pct > 0 and current_price > 0:
         stop = current_price * (1 - max(0.05, atr_pct / 100 * 1.5))
     elif current_price > 0:
         stop = current_price * 0.92
 
-    horizon = None
-    if isinstance(multi, dict) and "horizons" in multi:
+    horizon = 1 if session else None
+    if not session and isinstance(multi, dict) and "horizons" in multi:
         for h in ["5d", "10d", "15d", "20d", "50d"]:
             hd = multi["horizons"].get(h, {})
             if isinstance(hd, dict) and _dir_bull(hd.get("direction")):

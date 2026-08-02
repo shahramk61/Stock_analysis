@@ -195,6 +195,130 @@ def test_engine_flat_exits_and_next_open(monkeypatch=None):
             assert t.get("exit_reason") in ("flat", "stop", "end_of_backtest", "signal")
 
 
+def test_session_open_to_close_same_day():
+    """Session mode: every closed trade exits same calendar day as entry."""
+    hist = _synth_hist(120, seed=2)
+    # Make open/high/low deterministic enough for stop-or-close path
+    hist = hist.copy()
+    hist["Open"] = hist["Close"].shift(1).fillna(hist["Close"].iloc[0]) * 1.001
+    hist["High"] = hist[["Open", "Close"]].max(axis=1) * 1.01
+    hist["Low"] = hist[["Open", "Close"]].min(axis=1) * 0.995  # rarely hit 1.5% stop
+
+    start = str(hist.index[40].date())
+    end = str(hist.index[-1].date())
+
+    bt = Backtester(
+        ticker="TEST",
+        start=start,
+        end=end,
+        initial_capital=50_000,
+        rebalance_days=1,
+        fast_mode=True,
+        use_forecasts=False,
+        use_memory=False,
+        execution_mode="session",
+        session_stop_pct=0.015,
+    )
+    bt._data = {
+        "ticker": "TEST",
+        "history": hist,
+        "info": {},
+        "start": start,
+        "end": end,
+        "fundamentals_pit": False,
+    }
+
+    import backtest.engine as eng_mod
+    import types
+
+    score_mod = types.ModuleType("score")
+    score_mod.calculate_pillars = lambda *a, **k: {
+        "overall": 65.0,
+        "signals": {
+            "atr_vol": {"atr_percent": 1.5},
+            "mc_risk": {"var_95": 10},
+            "regime": {"regime": "Bull"},
+            "trend": {"stack": "Bullish"},
+            "classic": {"macd_cross": "Bullish"},
+            "adx": {"adx": 28, "plus_di": 24, "minus_di": 12},
+            "multi_h": {"consensus_direction": "Bullish", "horizons": {}},
+        },
+    }
+    sys.modules["score"] = score_mod
+    qa_pkg = types.ModuleType("agents")
+    qa_sub = types.ModuleType("agents.quantitative_analyst")
+    qa_mod = types.ModuleType("agents.quantitative_analyst.quantitative_analyst")
+    qa_mod.create_quantitative_analyst = lambda **k: (
+        lambda state: {"quantitative_conviction": "High"}
+    )
+    sys.modules["agents"] = qa_pkg
+    sys.modules["agents.quantitative_analyst"] = qa_sub
+    sys.modules["agents.quantitative_analyst.quantitative_analyst"] = qa_mod
+
+    def always_long(scores, **kwargs):
+        from backtest.policy import TradeSignal
+        px = kwargs.get("current_price") or 100.0
+        return TradeSignal(
+            ticker="TEST",
+            asof="n/a",
+            action="long",
+            conviction="High",
+            overall_score=65.0,
+            suggested_risk_pct=0.01,
+            stop_price=px * 0.985,
+            rationale="forced session long",
+            horizon_days=1,
+        )
+
+    orig = eng_mod.default_policy
+    eng_mod.default_policy = always_long
+    try:
+        result = bt.run()
+    finally:
+        eng_mod.default_policy = orig
+
+    assert result.metrics.get("execution_mode") == "session"
+    assert len(result.trades) >= 1
+    for t in result.trades:
+        assert "exit_date" in t, t
+        assert t["entry_date"] == t["exit_date"], t
+        assert t.get("exit_reason") in ("session_close", "stop"), t
+        # No overnight: position should be flat on every equity mark
+    assert (result.equity_curve["position"] == 0).all()
+
+
+def test_session_policy_tighter_stop():
+    from backtest.policy import default_policy
+    scores = {
+        "overall": 72.0,
+        "signals": {
+            "multi_h": {"consensus_direction": "Bullish", "horizons": {}},
+            "mc_risk": {"var_95": 12.0, "stop_price": 80.0},  # loose swing stop
+            "regime": {"regime": "Bull"},
+            "classic": {"macd_cross": "Bullish"},
+            "adx": {"adx": 30, "plus_di": 25, "minus_di": 10},
+            "trend": {"stack": "Bullish"},
+            "atr_vol": {"atr_percent": 1.5},
+        },
+    }
+    swing = default_policy(
+        scores, quant_output={"quantitative_conviction": "Medium"}, current_price=100.0
+    )
+    sess = default_policy(
+        scores,
+        quant_output={"quantitative_conviction": "Medium"},
+        current_price=100.0,
+        atr_pct=1.5,
+        execution_mode="session",
+        session_stop_pct=0.015,
+    )
+    assert swing.action == "long" and sess.action == "long"
+    assert sess.stop_price is not None and swing.stop_price is not None
+    # Session stop should be much closer to price than MC stop 80
+    assert sess.stop_price > 95.0
+    assert sess.horizon_days == 1
+
+
 if __name__ == "__main__":
     test_flatten_multiindex()
     test_asof_no_future()
@@ -203,4 +327,6 @@ if __name__ == "__main__":
     test_strict_policy_no_demo_long_at_50()
     test_strict_policy_long_when_qualified()
     test_engine_flat_exits_and_next_open()
+    test_session_open_to_close_same_day()
+    test_session_policy_tighter_stop()
     print("All backtest engine tests passed.")

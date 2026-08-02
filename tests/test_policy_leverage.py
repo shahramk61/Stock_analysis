@@ -69,9 +69,22 @@ def test_bearish_consensus_blocks_soft_long():
     assert sig.action == "flat"
 
 
-def test_bullish_consensus_path():
+def test_bullish_consensus_path_demoted_by_default():
+    """Path C multi-horizon entry is OFF by default (feature audit)."""
     s = _scores(56.0, stack="Mixed", consensus="Bullish", macd="Neutral")
     sig = default_policy(s, quant_output={"quantitative_conviction": "Medium"}, current_price=100.0)
+    assert sig.action == "flat", sig.rationale
+    assert "multi-horizon" not in sig.rationale.lower()
+
+
+def test_bullish_consensus_path_opt_in():
+    s = _scores(56.0, stack="Mixed", consensus="Bullish", macd="Neutral")
+    sig = default_policy(
+        s,
+        quant_output={"quantitative_conviction": "Medium"},
+        current_price=100.0,
+        allow_multi_horizon_entry=True,
+    )
     assert sig.action == "long", sig.rationale
     assert "multi-horizon" in sig.rationale.lower() or "Bullish" in sig.rationale
 
@@ -122,7 +135,8 @@ if __name__ == "__main__":
     test_high_var_blocks_trend_long()
     test_bear_regime_blocks_long()
     test_bearish_consensus_blocks_soft_long()
-    test_bullish_consensus_path()
+    test_bullish_consensus_path_demoted_by_default()
+    test_bullish_consensus_path_opt_in()
     test_finbert_bull_changes_path_vs_neutral()
     test_extract_leverage_flags_news_active()
     test_choose_entry_pure()

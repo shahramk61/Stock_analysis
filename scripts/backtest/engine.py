@@ -1,12 +1,21 @@
 """
 Walk-forward backtest engine for the Stock Analysis agent.
 
-Execution model (realistic enough for validation):
+Execution models:
+
+**swing** (default — multi-day holds):
 1. On decision days: compute signals/scores using data ≤ decision close.
 2. Orders fill on the *next* trading day's open (next-bar fill, not same-close).
 3. While in a position: check stop using the day's low (gap-aware: fill at open if gapped through).
 4. Policy `flat` closes the position on next open.
 5. Equity marked daily at close; returns vs initial capital; BH uses test window only.
+
+**session** (same-day open→close on daily bars):
+1. Decision at close T uses data ≤ T close → pending buy for T+1 if long.
+2. Fill at T+1 open (optional gap-down cancel).
+3. Intraday stop on the day's low (gap-aware).
+4. If still open, force exit at T+1 close (`session_close`) — never overnight.
+5. Equity marked flat at close each day.
 
 No demo/relaxed forced re-entries.
 """
@@ -15,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 
@@ -35,6 +44,13 @@ from .memory import DecisionMemory, MemoryConfig
 COMMISSION_PCT = 0.001   # 0.1% round-trip total → half per side
 SLIPPAGE_PCT = 0.0005    # 0.05% one-way
 MAX_GROSS_EXPOSURE = 0.95  # never deploy more than 95% of cash notional
+
+ExecutionMode = Literal["swing", "session"]
+
+# Session (open→close) defaults: tighter risk than multi-day swing
+SESSION_STOP_PCT = 0.015          # 1.5% stop from entry open
+SESSION_MAX_GAP_DOWN = 0.012      # cancel long if open gaps down >1.2% vs prior close
+SESSION_RISK_SCALE = 0.85         # slightly smaller risk (two-way costs same day)
 
 
 @dataclass
@@ -64,9 +80,14 @@ class Backtester:
         debate_mode: bool = False,
         x_pre_fetched: dict | None = None,
         relaxed: bool = False,  # kept for API compat; ignored (strict execution only)
-        use_forecasts: bool = True,
+        use_forecasts: bool = False,
         use_memory: bool = True,
         memory_config: Optional[MemoryConfig] = None,
+        execution_mode: ExecutionMode = "swing",
+        session_stop_pct: float = SESSION_STOP_PCT,
+        session_max_gap_down: float = SESSION_MAX_GAP_DOWN,
+        session_require_non_neg_gap: bool = False,
+        allow_multi_horizon_entry: bool = False,
     ):
         self.ticker = ticker.upper()
         self.start = str(start)
@@ -79,10 +100,17 @@ class Backtester:
         self.debate_mode = debate_mode
         self.x_pre_fetched = x_pre_fetched
         self.relaxed = False  # demo mode disabled
-        self.use_forecasts = use_forecasts
+        self.use_forecasts = bool(use_forecasts)
         self.use_memory = use_memory
         self.memory_config = memory_config or MemoryConfig(enabled=use_memory)
+        mode = str(execution_mode or "swing").lower().strip()
+        self.execution_mode: ExecutionMode = "session" if mode == "session" else "swing"
+        self.session_stop_pct = max(0.003, float(session_stop_pct))
+        self.session_max_gap_down = max(0.0, float(session_max_gap_down))
+        self.session_require_non_neg_gap = bool(session_require_non_neg_gap)
+        self.allow_multi_horizon_entry = bool(allow_multi_horizon_entry)
         self._data: Optional[Dict[str, Any]] = None
+        self._session = self.execution_mode == "session"
 
     def _prepare_data(self) -> Dict[str, Any]:
         if self._data is None:
@@ -201,6 +229,7 @@ class Backtester:
 
         # Pending order filled next open: {"side": "buy"|"sell", "shares", "stop", "meta"}
         pending: Optional[Dict[str, Any]] = None
+        prior_close: Optional[float] = None
 
         for i, day in enumerate(days):
             day_str = str(pd.Timestamp(day).date())
@@ -219,16 +248,64 @@ class Backtester:
                     )
                     stop_price = None
                 elif side == "buy" and position == 0:
-                    cash, position, entry_price, stop_price = self._open_long(
-                        cash,
-                        int(pending.get("shares", 0)),
-                        o,
-                        day_str,
-                        pending.get("stop"),
-                        pending.get("meta") or {},
-                        trades,
-                        memory=mem,
-                    )
+                    skip_buy = False
+                    skip_reason = None
+                    if self._session and prior_close is not None and prior_close > 0:
+                        gap = (o - prior_close) / prior_close
+                        if gap < -self.session_max_gap_down:
+                            skip_buy = True
+                            skip_reason = f"gap_down_cancel({gap * 100:.2f}%)"
+                        elif self.session_require_non_neg_gap and gap < 0:
+                            skip_buy = True
+                            skip_reason = f"neg_gap_cancel({gap * 100:.2f}%)"
+                    if skip_buy:
+                        meta = pending.get("meta") or {}
+                        decisions.append({
+                            "date": day_str,
+                            "price": o,
+                            "overall_score": meta.get("score"),
+                            "action": "flat",
+                            "conviction": meta.get("conviction"),
+                            "rationale": f"session skip: {skip_reason} | planned: {meta.get('rationale', '')}",
+                            "suggested_risk_pct": 0.0,
+                            "stop_price": None,
+                            "debate_note": None,
+                            "memory_flags": ["session_gap_cancel"],
+                            "memory_risk_multiplier": 1.0,
+                            "execution_mode": self.execution_mode,
+                        })
+                    else:
+                        shares = int(pending.get("shares", 0))
+                        stop = pending.get("stop")
+                        meta = dict(pending.get("meta") or {})
+                        if self._session:
+                            session_stop = o * (1.0 - self.session_stop_pct)
+                            # Tighter stop wins (higher price below entry)
+                            pol = float(stop) if stop is not None else 0.0
+                            if pol > 0 and pol < o:
+                                stop = max(pol, session_stop)
+                            else:
+                                stop = session_stop
+                            risk_pct = float(meta.get("risk_pct") or self.risk_per_trade)
+                            shares = position_size_shares(
+                                equity=cash,
+                                risk_pct=risk_pct,
+                                price=o,
+                                stop_price=stop,
+                                max_notional_pct=MAX_GROSS_EXPOSURE,
+                            )
+                            meta["session_stop_pct"] = self.session_stop_pct
+                            meta["fill_open"] = round(o, 4)
+                        cash, position, entry_price, stop_price = self._open_long(
+                            cash,
+                            shares,
+                            o,
+                            day_str,
+                            stop,
+                            meta,
+                            trades,
+                            memory=mem,
+                        )
                 pending = None
 
             # ── 2) Intraday stop check (long): use low; gap-through → open ───
@@ -240,6 +317,14 @@ class Backtester:
                         memory=mem,
                     )
                     stop_price = None
+
+            # ── 2b) Session: force flat at close (never hold overnight) ──────
+            if self._session and position > 0:
+                cash, position, entry_price = self._close_position(
+                    cash, position, entry_price, c, day_str, trades, "session_close",
+                    memory=mem,
+                )
+                stop_price = None
 
             # ── 3) Decision at close (signals ≤ today) → next-bar order ──────
             decision_note = None
@@ -321,6 +406,8 @@ class Backtester:
                         profile=self.profile,
                         relaxed=False,
                         memory=mem_policy,
+                        execution_mode=self.execution_mode,
+                        allow_multi_horizon_entry=self.allow_multi_horizon_entry,
                     )
 
                     decision_note = {
@@ -335,37 +422,68 @@ class Backtester:
                         "debate_note": quant_out.get("quantitative_debate_commentary") if self.debate_mode else None,
                         "memory_flags": (mem_snap or {}).get("flags") if mem_snap else [],
                         "memory_risk_multiplier": (mem_snap or {}).get("risk_multiplier") if mem_snap else 1.0,
+                        "execution_mode": self.execution_mode,
                     }
                     decisions.append(decision_note)
                     mem.record_decision(decision_note)
 
-                    if sig.action == "flat" and position > 0:
-                        pending = {"side": "sell", "reason": "flat", "meta": decision_note}
-                    elif sig.action == "long" and position == 0:
-                        equity_now = cash
-                        risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
-                        shares = position_size_shares(
-                            equity=equity_now,
-                            risk_pct=risk_pct,
-                            price=c,
-                            stop_price=sig.stop_price,
-                            max_notional_pct=MAX_GROSS_EXPOSURE,
-                        )
-                        if shares > 0:
-                            pending = {
-                                "side": "buy",
-                                "shares": shares,
-                                "stop": sig.stop_price,
-                                "meta": {
-                                    "conviction": sig.conviction,
-                                    "score": scores.get("overall"),
-                                    "rationale": sig.rationale,
-                                    "decision_date": day_str,
-                                },
-                            }
-                    elif sig.action == "long" and position > 0 and sig.stop_price:
-                        if stop_price is None or float(sig.stop_price) > float(stop_price):
-                            stop_price = float(sig.stop_price)
+                    if self._session:
+                        # Never carry overnight; only schedule next-open long when flat
+                        if sig.action == "long" and position == 0:
+                            equity_now = cash
+                            risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
+                            risk_pct *= SESSION_RISK_SCALE
+                            stop_for_size = c * (1.0 - self.session_stop_pct)
+                            if sig.stop_price is not None and 0 < float(sig.stop_price) < c:
+                                stop_for_size = max(float(sig.stop_price), stop_for_size)
+                            shares = position_size_shares(
+                                equity=equity_now,
+                                risk_pct=risk_pct,
+                                price=c,
+                                stop_price=stop_for_size,
+                                max_notional_pct=MAX_GROSS_EXPOSURE,
+                            )
+                            if shares > 0:
+                                pending = {
+                                    "side": "buy",
+                                    "shares": shares,
+                                    "stop": stop_for_size,
+                                    "meta": {
+                                        "conviction": sig.conviction,
+                                        "score": scores.get("overall"),
+                                        "rationale": sig.rationale,
+                                        "decision_date": day_str,
+                                        "risk_pct": risk_pct,
+                                    },
+                                }
+                    else:
+                        if sig.action == "flat" and position > 0:
+                            pending = {"side": "sell", "reason": "flat", "meta": decision_note}
+                        elif sig.action == "long" and position == 0:
+                            equity_now = cash
+                            risk_pct = float(sig.suggested_risk_pct or 0) or float(self.risk_per_trade)
+                            shares = position_size_shares(
+                                equity=equity_now,
+                                risk_pct=risk_pct,
+                                price=c,
+                                stop_price=sig.stop_price,
+                                max_notional_pct=MAX_GROSS_EXPOSURE,
+                            )
+                            if shares > 0:
+                                pending = {
+                                    "side": "buy",
+                                    "shares": shares,
+                                    "stop": sig.stop_price,
+                                    "meta": {
+                                        "conviction": sig.conviction,
+                                        "score": scores.get("overall"),
+                                        "rationale": sig.rationale,
+                                        "decision_date": day_str,
+                                    },
+                                }
+                        elif sig.action == "long" and position > 0 and sig.stop_price:
+                            if stop_price is None or float(sig.stop_price) > float(stop_price):
+                                stop_price = float(sig.stop_price)
 
             # ── 4) Mark equity at close ──────────────────────────────────────
             mtm = cash + position * c
@@ -383,8 +501,10 @@ class Backtester:
                 "debate_note": (decision_note or {}).get("debate_note"),
                 "memory_flags": (decision_note or {}).get("memory_flags"),
             })
+            prior_close = c
 
         # Close any open position at final close (blotter + cash consistency)
+        # Session mode should already be flat; safety net for swing / last pending.
         if position > 0 and len(days) > 0:
             last = days[-1]
             last_str = str(pd.Timestamp(last).date())
@@ -397,11 +517,11 @@ class Backtester:
                 equity_records[-1]["equity"] = cash
                 equity_records[-1]["cash"] = cash
                 equity_records[-1]["position"] = 0
+
         eq_df = pd.DataFrame(equity_records)
         if not eq_df.empty:
             eq_df["date"] = pd.to_datetime(eq_df["date"])
             eq_df = eq_df.set_index("date")
-            # Returns from initial capital path
             eq_df["returns"] = eq_df["equity"].pct_change()
             eq_df.loc[eq_df.index[0], "returns"] = (
                 eq_df["equity"].iloc[0] / self.initial_capital - 1.0
@@ -433,7 +553,15 @@ class Backtester:
             metrics["bh_end_price"] = round(end_px, 4)
 
         metrics["num_decisions"] = len(decisions)
-        metrics["execution_model"] = "next_open_fill + daily_stop_on_low"
+        if self._session:
+            metrics["execution_model"] = (
+                "session_open_to_close + daily_stop_on_low + gap_down_cancel"
+            )
+            metrics["session_stop_pct"] = self.session_stop_pct
+            metrics["session_max_gap_down"] = self.session_max_gap_down
+        else:
+            metrics["execution_model"] = "next_open_fill + daily_stop_on_low"
+        metrics["execution_mode"] = self.execution_mode
         metrics["fundamentals_pit"] = False
         metrics["memory_enabled"] = bool(self.use_memory and mem.config.enabled)
 

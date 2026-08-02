@@ -10,7 +10,12 @@ This file captures the audit of existing decision/risk logic (from plan Phase 0)
 - **Dashboard**: similar thresholds; Strong Buy 75+, Buy 60+, Hold/Watch 50+.
 - Multi-horizon consensus/trend + quant conviction drive `default_policy` (backtest), not the static rec string alone.
 - **Risk filters (strict):** VaR>30 or Bear regime → flat; elevated VaR / bearish MACD+ADX/SMA → size cut.
-- **Execution model (corrected):** signal at decision close → **next open fill**; **daily stop on low** (gap → open); **flat exits** next open; size **cash-capped** (≤95% notional); equity marked daily; BH on test window only; live `info` not used in replay.
+- **Execution models:**
+  - **swing (default):** signal at decision close → **next open fill**; **daily stop on low** (gap → open); **flat exits** next open; multi-day holds; size **cash-capped** (≤95% notional).
+  - **session (`--session`):** same-day open→close on daily bars; prior-close signal → next open; stop on low; force **session_close** at EOD (never overnight); gap-down cancel; tighter ~1.5% stops; slight risk haircut.
+  - Both: equity marked daily; BH on test window only; live `info` not used in replay.
+- **Forecasts default OFF** (`use_forecasts=False`; CLI `--forecasts` opt-in). Path C multi-horizon entry default OFF (`allow_multi_horizon_entry`; CLI `--multi-horizon-entry`).
+- **Dual labels:** Research (score BUY/HOLD) vs Execute (policy long/flat) — DCF/text BUY must not override policy.
 - Demo / `--relaxed` paths removed.
 - **Multi-signal entry (`choose_entry`):** trend (SMA/ADX/MACD), multi-horizon consensus, FinBERT/news, plus classic score/conviction paths; hard VaR>30 / Bear regime / soft-path bearish consensus blocks; memory cooldown still wins.
 - **Fast mode:** skips multi-horizon training but keeps FinBERT (`use_gpu_signals=True`) so news leverage can fire without full ensemble cost.

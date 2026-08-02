@@ -15,12 +15,12 @@ from gpu_utils import gpu_available
 
 def calculate_pillars(data: dict, profile: str = "Balanced", compute_dynamic_weights: bool = False,
                       hist: "pd.DataFrame | None" = None, asof: str | None = None,
-                      use_gpu_signals: bool = True, use_forecasts: bool = True,
+                      use_gpu_signals: bool = True, use_forecasts: bool = False,
                       full_horizons: bool = False):
     """Compute pillars and signals. Supports `hist`/`asof` for historical backtesting replay.
 
     Set use_gpu_signals=False for fast backtests (skips heavy ML).
-    Set use_forecasts=False to disable neural time-series forecasting.
+    use_forecasts defaults False (audit: multi-horizon is research-only / opt-in).
     Set full_horizons=True for 5/10/15/20/50d (default is 5/20/50 for speed).
 
     Six pillars: Fundamentals, Technicals, Valuation, Sentiment, ESG, Risk.

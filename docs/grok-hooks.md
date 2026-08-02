@@ -8,8 +8,9 @@ No `XAI_API_KEY` is required for normal use.
 | Trigger | How |
 |---------|-----|
 | Manual decision | `/decide-stock TICKER` in this Grok Build chat |
-| Facts only (no LLM) | `python scripts/prepare_decision_handoff.py TICKER --fast` |
+| Facts only (no LLM) | `python scripts/prepare_decision_handoff.py TICKER --fast` (forecasts off by default) |
 | Agents | `.grok/agents/stock-*.md` (run as Grok Build agents/subagents) |
+| Research vs Execute | Always read `dual_recommendation` + `policy_hint` in handoff — Research BUY ≠ order |
 
 ## Do not use for the primary path
 
