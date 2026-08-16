@@ -62,6 +62,7 @@ class TimingCard:
     dual_execute_label: Optional[str] = None
     risk_veto_decision: Optional[str] = None  # ALLOW | CUT | VETO
     risk_veto_blocks: bool = False
+    book_blocks: bool = False  # PM book not ready
     memory_blocks: bool = False
     session_blocks: bool = False
     tape_blocks: bool = False
@@ -76,6 +77,7 @@ def build_timing_card(
     dual_recommendation: Optional[Dict[str, Any]] = None,
     decision_memory: Optional[Dict[str, Any]] = None,
     risk_veto: Optional[Dict[str, Any]] = None,
+    book: Optional[Dict[str, Any]] = None,
     current_price: Optional[float] = None,
     overall_score: float = 50.0,
     atr_pct: float = 0.0,
@@ -94,6 +96,7 @@ def build_timing_card(
         dual_recommendation: Dual research/execute labels
         decision_memory: Memory dict (from memory.apply_to_policy_inputs)
         risk_veto: Risk veto object (decision, reason, missing, risk_pct)
+        book: PM book object (book_ready, starting_cash, positions, open_risk_pct)
         current_price: Current market price
         overall_score: Overall score
         atr_pct: ATR percentage
@@ -141,12 +144,13 @@ def build_timing_card(
         horizon_tighter_stop=horizon_choice.tighter_stop,
     )
     
-    # 4. Execute gate (includes risk_veto)
+    # 4. Execute gate (includes risk_veto and PM book)
     gate = gate_execution(
         policy_hint=policy_hint,
         dual_recommendation=dual_recommendation,
         decision_memory=decision_memory,
         risk_veto=risk_veto,
+        book=book,
         session=session,
         levels=levels,
         overall_score=overall_score,
@@ -203,6 +207,7 @@ def build_timing_card(
         dual_execute_label=gate.dual_execute_label,
         risk_veto_decision=gate.risk_veto_decision,
         risk_veto_blocks=gate.risk_veto_blocks,
+        book_blocks=gate.book_blocks,
         memory_blocks=gate.memory_blocks,
         session_blocks=gate.session_blocks,
         tape_blocks=gate.tape_blocks,
@@ -234,6 +239,7 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
     policy_hint = handoff.get("policy_hint") or {}
     dual_rec = handoff.get("dual_recommendation") or {}
     risk_veto = handoff.get("risk_veto") or None
+    book = handoff.get("book") or None
     
     # Memory not in handoff by default (passed as empty string)
     # Could be added from journal
@@ -253,6 +259,7 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
         "dual_recommendation": dual_rec,
         "decision_memory": decision_memory,
         "risk_veto": risk_veto,
+        "book": book,
         "current_price": handoff.get("current_price"),
         "overall_score": signals_obj.get("overall_score") or 50.0,
         "atr_pct": atr_vol.get("atr_percent") or 0.0,
@@ -320,6 +327,16 @@ def main():
         help="Risk veto reason text",
     )
     parser.add_argument(
+        "--book-ready",
+        action="store_true",
+        help="PM book ready flag (default False)",
+    )
+    parser.add_argument(
+        "--starting-cash",
+        type=float,
+        help="PM book starting cash",
+    )
+    parser.add_argument(
         "--output",
         help="Output JSON file path (prints to stdout if not specified)",
     )
@@ -357,12 +374,23 @@ def main():
                 "risk_pct": args.risk_veto_risk_pct,
             }
         
+        # Build book from CLI args if provided
+        book = None
+        if args.book_ready or args.starting_cash is not None:
+            book = {
+                "book_ready": bool(args.book_ready),
+                "starting_cash": args.starting_cash,
+                "positions": [],  # Empty from CLI (full book from handoff)
+                "open_risk_pct": None,
+            }
+        
         facts = {
             "ticker": args.ticker,
             "policy_hint": {"action": args.policy_action} if args.policy_action else None,
             "dual_recommendation": None,
             "decision_memory": None,
             "risk_veto": risk_veto,
+            "book": book,
             "current_price": args.current_price,
             "overall_score": args.score,
             "atr_pct": args.atr_pct,

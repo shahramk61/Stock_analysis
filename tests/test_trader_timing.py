@@ -20,9 +20,13 @@ from trader.gate import gate_execution, normalize_action  # noqa: E402
 from trader.timing import build_timing_card  # noqa: E402
 
 
-# ============================================================================
-# Session clock tests
-# ============================================================================
+# Valid book for testing (PM book ready)
+_VALID_BOOK = {
+    "book_ready": True,
+    "starting_cash": 100000.0,
+    "positions": [],
+    "open_risk_pct": 0.0,
+}
 
 def test_weekend_closed():
     """Weekend (Saturday/Sunday) → closed, no new trades."""
@@ -217,6 +221,7 @@ def test_policy_hint_flat_stays_flat():
     gate = gate_execution(
         policy_hint={"action": "flat", "conviction": "Medium"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -233,6 +238,7 @@ def test_research_buy_policy_flat_conflict():
             "research_recommendation": "BUY",
             "execution_label": "FLAT",
         },
+        book=_VALID_BOOK
     )
     assert gate.execute_action == "flat"
     assert gate.policy_conflict is True
@@ -243,6 +249,7 @@ def test_memory_block_new_long():
     gate = gate_execution(
         policy_hint={"action": "long"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK,
         decision_memory={"block_new_long": True, "flags": ["stop_cooldown(3d left)"]},
         session=None,  # Will check now
         levels=compute_levels(current_price=100.0),
@@ -261,6 +268,7 @@ def test_session_closed_blocks():
     gate = gate_execution(
         policy_hint={"action": "long"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK,
         session=session,
         levels=compute_levels(current_price=100.0),
     )
@@ -274,6 +282,7 @@ def test_missing_tape_blocks():
     gate = gate_execution(
         policy_hint={"action": "long"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK,
         levels=compute_levels(current_price=None),  # No price
     )
     assert gate.execute_action == "flat"
@@ -289,12 +298,14 @@ def test_all_gates_pass_allows_long():
     gate = gate_execution(
         policy_hint={"action": "long"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK,
         session=session,
         levels=compute_levels(current_price=100.0),
     )
     assert gate.execute_action == "long"
     assert gate.would_be_flat is False
     assert not gate.risk_veto_blocks
+    assert not gate.book_blocks
     assert not gate.memory_blocks
     assert not gate.session_blocks
     assert not gate.tape_blocks
@@ -326,6 +337,7 @@ def test_timing_card_weekend_not_a_trade():
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=sat,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -347,6 +359,7 @@ def test_timing_card_open_market_with_tape():
         atr_pct=2.5,
         adx=22.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is True
@@ -368,6 +381,7 @@ def test_timing_card_policy_flat_not_a_trade():
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -385,6 +399,7 @@ def test_timing_card_missing_price_not_a_trade():
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=None,  # Missing!
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -407,6 +422,7 @@ def test_timing_card_memory_block_not_a_trade():
         },
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -427,6 +443,7 @@ def test_timing_card_session_vs_swing():
         atr_pct=2.0,
         execution_mode="session",
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     # Swing mode
@@ -438,6 +455,7 @@ def test_timing_card_session_vs_swing():
         atr_pct=2.0,
         execution_mode="swing",
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card_session.horizon == "session"
@@ -449,6 +467,153 @@ def test_timing_card_session_vs_swing():
         session_distance = 100.0 - card_session.stop_price
         swing_distance = 100.0 - card_swing.stop_price
         assert session_distance < swing_distance
+
+
+# ============================================================================
+# PM book tests
+# ============================================================================
+
+def test_book_ready_false_blocks():
+    """book_ready=false → flat on NEW risk."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    book = {
+        "book_ready": False,
+        "starting_cash": 100000.0,
+        "positions": [],
+        "open_risk_pct": 0.0,
+    }
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.book_blocks is True
+    assert any("book_ready" in r.lower() for r in gate.reasons)
+
+
+def test_book_missing_blocks():
+    """Missing book object → fail closed (flat)."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=None,  # Missing book
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.book_blocks is True
+    assert any("book missing" in r.lower() for r in gate.reasons)
+
+
+def test_book_no_cash_no_positions_blocks():
+    """book_ready=True but no cash and no positions → no add."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    book = {
+        "book_ready": True,
+        "starting_cash": 0.0,  # No cash
+        "positions": [],  # No positions
+        "open_risk_pct": 0.0,
+    }
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.book_blocks is True
+    assert any("no starting_cash" in r.lower() or "no add" in r.lower() for r in gate.reasons)
+
+
+def test_book_ready_with_cash_passes():
+    """book_ready=True with starting_cash → book gate passes."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    book = {
+        "book_ready": True,
+        "starting_cash": 100000.0,
+        "positions": [],
+        "open_risk_pct": 0.0,
+    }
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    # Should pass book gate (other gates may still apply)
+    assert gate.book_blocks is False
+    assert gate.execute_action == "long"  # All gates pass
+    assert gate.would_be_flat is False
+
+
+def test_book_ready_with_positions_passes():
+    """book_ready=True with positions (even no cash) → book gate passes."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    book = {
+        "book_ready": True,
+        "starting_cash": None,  # No cash
+        "positions": [{"ticker": "SPY", "shares": 100}],  # But has positions
+        "open_risk_pct": 2.0,
+    }
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    # Should pass book gate
+    assert gate.book_blocks is False
+    assert gate.execute_action == "long"
+    assert gate.would_be_flat is False
+
+
+def test_book_dont_synthesize():
+    """Ensure we don't synthesize a book when missing."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    # No book provided → should fail closed
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=None,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.book_blocks is True
+    assert gate.execute_action == "flat"
+    # Ensure we didn't invent cash or positions
+    assert any("book missing" in r.lower() for r in gate.reasons)
 
 
 # ============================================================================
@@ -465,6 +630,7 @@ def test_risk_veto_missing_fails_closed():
         risk_veto=None,  # Missing!
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -482,6 +648,7 @@ def test_risk_veto_invalid_decision_fails_closed():
         risk_veto={"decision": "UNKNOWN", "reason": "invalid"},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -498,6 +665,7 @@ def test_risk_veto_veto_stays_flat():
         risk_veto={"decision": "VETO", "reason": "Risk veto: high VaR", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -517,6 +685,7 @@ def test_risk_veto_cut_with_null_risk_pct_flat():
         risk_veto={"decision": "CUT", "reason": "Size cut", "missing": ["risk_pct"], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -535,6 +704,7 @@ def test_risk_veto_cut_keeps_long_uses_risk_pct():
         risk_veto={"decision": "CUT", "reason": "Size cut to 0.5%", "missing": [], "risk_pct": 0.005},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "long"
     assert gate.would_be_flat is False
@@ -554,6 +724,7 @@ def test_risk_veto_cut_policy_flat_stays_flat():
         risk_veto={"decision": "CUT", "reason": "Size cut", "missing": [], "risk_pct": 0.005},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -570,6 +741,7 @@ def test_risk_veto_allow_applies_other_gates():
         risk_veto={"decision": "ALLOW", "reason": "Risk approved", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "long"
     assert gate.would_be_flat is False
@@ -587,6 +759,7 @@ def test_risk_veto_allow_session_closed_flat():
         risk_veto={"decision": "ALLOW", "reason": "Risk approved", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
@@ -608,6 +781,7 @@ def test_risk_veto_dont_parse_policy_rationale():
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
+        book=_VALID_BOOK,
     )
     assert gate.execute_action == "long"
     assert gate.would_be_flat is False
@@ -623,6 +797,7 @@ def test_timing_card_risk_veto_missing():
         risk_veto=None,  # Missing!
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -641,6 +816,7 @@ def test_timing_card_risk_veto_veto():
         risk_veto={"decision": "VETO", "reason": "High VaR", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is False
@@ -659,6 +835,7 @@ def test_timing_card_risk_veto_cut():
         risk_veto={"decision": "CUT", "reason": "Size to 0.3%", "missing": [], "risk_pct": 0.003},
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is True
@@ -678,6 +855,7 @@ def test_timing_card_risk_veto_allow():
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=mon_open,
+        book=_VALID_BOOK,
     )
     
     assert card.now_a_trade is True
@@ -740,5 +918,13 @@ if __name__ == "__main__":
     test_timing_card_risk_veto_veto()
     test_timing_card_risk_veto_cut()
     test_timing_card_risk_veto_allow()
+    
+    # PM book tests
+    test_book_ready_false_blocks()
+    test_book_missing_blocks()
+    test_book_no_cash_no_positions_blocks()
+    test_book_ready_with_cash_passes()
+    test_book_ready_with_positions_passes()
+    test_book_dont_synthesize()
     
     print("All trader timing tests passed.")

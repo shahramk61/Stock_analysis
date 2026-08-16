@@ -1,15 +1,23 @@
 """
-Execute gate: combine risk_veto, policy_hint, dual_recommendation, decision memory, 
-session clock, and tape quality.
+Execute gate: combine risk_veto, PM book, policy_hint, dual_recommendation, 
+decision memory, session clock, and tape quality.
 
-Risk veto hierarchy (fail closed):
-1. Missing/invalid risk_veto → flat (fail closed for NEW risk)
-2. VETO → flat, risk = 0
-3. CUT → keep long only if policy says long; use risk_veto.risk_pct (if null → flat)
-4. ALLOW → still apply clock/tape/policy/memory gates
+Gate hierarchy (all fail closed):
+0. Risk veto (fail closed)
+   - Missing/invalid → flat
+   - VETO → flat, risk = 0
+   - CUT → use risk_veto.risk_pct, keep long only if policy constructive
+   - ALLOW → proceed
+1. PM book (fail closed)
+   - book_ready false/missing → flat on NEW risk
+   - starting_cash missing/null/0 and no positions → no add
+   - Don't invent book
+2. Policy flat → stay flat
+3. Memory block → flat
+4. Session closed → flat
+5. Tape invalid → flat
 
 Research BUY must never become a long when Execute is FLAT.
-Memory block_new_long wins. Closed market / missing tape → flat.
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ from .levels import TradeLevels
 @dataclass
 class ExecuteGate:
     """
-    Execute gating decision combining all timing/tape/memory/risk factors.
+    Execute gating decision combining all timing/tape/memory/risk/book factors.
     
     would_be_flat: True if any gate blocks execution
     execute_action: final action after all gates applied
@@ -42,6 +50,7 @@ class ExecuteGate:
     research_label: Optional[str] = None
     risk_veto_decision: Optional[str] = None  # ALLOW | CUT | VETO
     risk_veto_blocks: bool = False
+    book_blocks: bool = False  # PM book not ready
     memory_blocks: bool = False
     session_blocks: bool = False
     tape_blocks: bool = False
@@ -64,24 +73,28 @@ def gate_execution(
     dual_recommendation: Optional[Dict[str, Any]] = None,
     decision_memory: Optional[Dict[str, Any]] = None,
     risk_veto: Optional[Dict[str, Any]] = None,
+    book: Optional[Dict[str, Any]] = None,
     session: Optional[MarketSession] = None,
     levels: Optional[TradeLevels] = None,
     overall_score: float = 50.0,
 ) -> ExecuteGate:
     """
-    Gate execution based on risk_veto, policy, memory, session clock, and tape.
+    Gate execution based on risk_veto, PM book, policy, memory, session clock, and tape.
     
-    Risk veto hierarchy (fail closed):
-    1. Missing/invalid risk_veto → flat (fail closed for NEW risk)
-    2. VETO → flat, risk = 0
-    3. CUT → keep long only if policy says long; use risk_veto.risk_pct (if null → flat)
-    4. ALLOW → still apply clock/tape/policy/memory gates
+    Gate hierarchy (all fail closed):
+    0. Risk veto: missing/VETO/CUT(null risk_pct) → flat
+    1. PM book: book_ready false/missing → flat on NEW risk
+    2. Policy flat → flat
+    3. Memory block → flat
+    4. Session closed → flat
+    5. Tape invalid → flat
     
     Args:
         policy_hint: Policy hint dict with action, conviction, rationale
         dual_recommendation: Dual research/execute labels
         decision_memory: Memory dict (from memory.apply_to_policy_inputs)
         risk_veto: Risk veto object (decision, reason, missing, risk_pct)
+        book: PM book object (book_ready, starting_cash, positions, open_risk_pct)
         session: Market session status
         levels: Trade levels with tape validity
     
@@ -136,6 +149,7 @@ def gate_execution(
             research_label=research_label,
             risk_veto_decision=None,
             risk_veto_blocks=True,
+            book_blocks=False,
             memory_blocks=False,
             session_blocks=False,
             tape_blocks=False,
@@ -163,6 +177,7 @@ def gate_execution(
             research_label=research_label,
             risk_veto_decision=risk_veto_decision,
             risk_veto_blocks=True,
+            book_blocks=False,
             memory_blocks=False,
             session_blocks=False,
             tape_blocks=False,
@@ -185,6 +200,7 @@ def gate_execution(
                 research_label=research_label,
                 risk_veto_decision=risk_veto_decision,
                 risk_veto_blocks=True,
+                book_blocks=False,
                 memory_blocks=False,
                 session_blocks=False,
                 tape_blocks=False,
@@ -215,6 +231,7 @@ def gate_execution(
             research_label=research_label,
             risk_veto_decision=risk_veto_decision,
             risk_veto_blocks=True,
+            book_blocks=False,
             memory_blocks=False,
             session_blocks=False,
             tape_blocks=False,
@@ -226,7 +243,34 @@ def gate_execution(
     # Apply remaining gates
     # ========================================================================
     
-    # Gate 1: Policy already flat
+    # Gate 1: PM book ready check (fail closed)
+    book_blocks = False
+    if not _is_book_ready(book):
+        # book_ready false/missing → flat on NEW risk
+        book_blocks = True
+        book_reason = _book_not_ready_reason(book)
+        reasons.append(f"PM book: {book_reason}")
+        return ExecuteGate(
+            would_be_flat=True,
+            execute_action="flat",
+            final_risk_pct=0.0,
+            reasons=reasons,
+            policy_hint_action=policy_action,
+            dual_execute_label=dual_execute_label,
+            research_label=research_label,
+            risk_veto_decision=risk_veto_decision,
+            risk_veto_blocks=False,
+            book_blocks=True,
+            memory_blocks=False,
+            session_blocks=False,
+            tape_blocks=False,
+            policy_conflict=_is_policy_conflict(research_label, "flat"),
+        )
+    
+    # Book ready - continue
+    reasons.append(f"PM book: ready (cash={book.get('starting_cash')}, positions={len(book.get('positions', []))})")
+    
+    # Gate 2: Policy already flat
     if proposed_action == "flat":
         reasons.append("Policy already flat - no execution")
         return ExecuteGate(
@@ -239,6 +283,7 @@ def gate_execution(
             research_label=research_label,
             risk_veto_decision=risk_veto_decision,
             risk_veto_blocks=False,
+            book_blocks=False,
             memory_blocks=False,
             session_blocks=False,
             tape_blocks=False,
@@ -253,7 +298,7 @@ def gate_execution(
     session_blocks = False
     tape_blocks = False
     
-    # Gate 2: Memory block (stop cooldown, loss streak, etc.)
+    # Gate 3: Memory block (stop cooldown, loss streak, etc.)
     if decision_memory and isinstance(decision_memory, dict):
         if decision_memory.get("block_new_long") and proposed_action == "long":
             memory_blocks = True
@@ -261,7 +306,7 @@ def gate_execution(
             blocks.append(f"memory block: {flags}")
             reasons.append(f"memory block: {flags}")
     
-    # Gate 3: Session clock (market closed → no new risk)
+    # Gate 4: Session clock (market closed → no new risk)
     if session:
         if not session.allows_new_trades:
             session_blocks = True
@@ -276,7 +321,7 @@ def gate_execution(
             blocks.append(f"session closed: {session.reason}")
             reasons.append(f"session gate: {session.reason}")
     
-    # Gate 4: Tape quality (missing or stale price)
+    # Gate 5: Tape quality (missing or stale price)
     if levels:
         if not levels.tape_valid:
             tape_blocks = True
@@ -313,6 +358,7 @@ def gate_execution(
         research_label=research_label,
         risk_veto_decision=risk_veto_decision,
         risk_veto_blocks=risk_veto_blocks,
+        book_blocks=book_blocks,
         memory_blocks=memory_blocks,
         session_blocks=session_blocks,
         tape_blocks=tape_blocks,
@@ -353,3 +399,65 @@ def _is_policy_conflict(research_label: Optional[str], execute_action: str) -> b
     research_bull = r in ("BUY", "STRONG_BUY")
     exec_not_long = execute_action != "long"
     return research_bull and exec_not_long
+
+
+def _is_book_ready(book: Optional[Dict[str, Any]]) -> bool:
+    """
+    Check if PM book is ready for NEW risk.
+    
+    Rules:
+    - book_ready must be explicitly True
+    - Don't treat missing/empty as "room to add"
+    - starting_cash or positions must exist (not both null/0/empty)
+    
+    Returns False if:
+    - book is None or not a dict
+    - book_ready is False, missing, or not True
+    - starting_cash is null/0 AND positions is empty/missing
+    """
+    if not book or not isinstance(book, dict):
+        return False
+    
+    # book_ready must be explicitly True
+    if book.get("book_ready") is not True:
+        return False
+    
+    # Must have starting_cash or positions (not both null/0/empty)
+    starting_cash = book.get("starting_cash")
+    positions = book.get("positions") or []
+    
+    has_cash = starting_cash is not None and _is_finite(starting_cash) and float(starting_cash) > 0
+    has_positions = isinstance(positions, list) and len(positions) > 0
+    
+    if not has_cash and not has_positions:
+        # No cash and no positions → no book
+        return False
+    
+    return True
+
+
+def _book_not_ready_reason(book: Optional[Dict[str, Any]]) -> str:
+    """Generate reason why book is not ready."""
+    if not book or not isinstance(book, dict):
+        return "book missing - fail closed (no add)"
+    
+    if book.get("book_ready") is False:
+        return "book_ready=false - no NEW risk"
+    
+    if book.get("book_ready") is None:
+        return "book_ready missing - fail closed"
+    
+    if book.get("book_ready") is not True:
+        return f"book_ready={book.get('book_ready')} (not True) - fail closed"
+    
+    # book_ready is True but no cash/positions
+    starting_cash = book.get("starting_cash")
+    positions = book.get("positions") or []
+    has_cash = starting_cash is not None and _is_finite(starting_cash) and float(starting_cash) > 0
+    has_positions = isinstance(positions, list) and len(positions) > 0
+    
+    if not has_cash and not has_positions:
+        return f"book_ready but no starting_cash (${starting_cash}) and no positions - no add"
+    
+    return "book not ready"
+
