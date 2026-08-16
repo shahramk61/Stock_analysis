@@ -308,12 +308,16 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Trader timing CLI - answers if now is actually a trade. For July 2026 paper run: --universe tickers.txt --asof 2026-07-01 (daily swing replay)."
+        description="Trader timing CLI - answers if now is actually a trade. "
+                    "July 2026 paper run: --universe MSFT,AAPL,... --asof 2026-07-01 --horizon swing. "
+                    "Universe: MSFT AAPL AMZN GOOGL JPM UNH LLY WMT CAT (9 names, do not expand). "
+                    "Fail-closed: no fill until Risk ALLOW + Quant last_print exist. $3000 cash real. No live broker."
     )
-    parser.add_argument("ticker", nargs="?", help="Ticker symbol (or use --universe for multiple tickers)")
+    parser.add_argument("ticker", nargs="?", help="Single ticker symbol (or use --universe)")
     parser.add_argument(
         "--universe",
-        help="Path to universe file (one ticker per line) for multi-ticker replay",
+        help="Universe: comma-separated tickers (MSFT,AAPL,...) or file path (one ticker per line). "
+             "July 2026: MSFT AAPL AMZN GOOGL JPM UNH LLY WMT CAT. Do not expand.",
     )
     parser.add_argument(
         "--handoff",
