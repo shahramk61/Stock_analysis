@@ -131,18 +131,27 @@ decision = vet_trade(
 
 ## CVaR (Conditional Value at Risk)
 
-Opt-in fail-closed check:
+Opt-in fail-closed check with **hardcoded fallback detection**:
 
 ```python
 decision = vet_trade(
     ...,
-    cvar_95=28.0,         # from pipeline (if available)
+    cvar_95=22.5,         # from MC sim (must be real, not fallback)
     require_cvar=True,    # opt-in: missing CVaR → VETO
+    mc_metadata={"paths": 10000, "simulations": 252},  # MC evidence
 )
 ```
 
-If `require_cvar=False` (default): missing CVaR is OK (check not enforced).
-If `require_cvar=True`: Quant pipeline must emit `cvar_95`; missing → VETO.
+**Hard rule from CoS/Quant**: CVaR must be from actual Monte Carlo sim, not fallback.
+
+- If `require_cvar=False` (default): CVaR check not enforced
+- If `require_cvar=True`: Quant pipeline must emit `cvar_95` from MC sim; missing → VETO
+
+**Fallback detection**:
+- CVaR in {20.0, 28.0} (old helper fallbacks) without MC evidence → **treat as missing → VETO**
+- MC evidence: `mc_metadata` with `paths > 0` or `simulations > 0` and no `is_fallback` flag
+- CVaR not in {20.0, 28.0} → no fallback check needed
+- Never invent CVaR. Never fill from fallbacks.
 
 ## Integration with Existing Policy
 

@@ -474,6 +474,107 @@ def test_veto_object_decision_is_veto_not_rationale():
     assert "var_95" in veto_obj["missing"]
 
 
+def test_hardcoded_cvar_20_fallback_vetoes():
+    """CVaR=20.0 (hardcoded fallback) without MC evidence → VETO."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=20.0,  # hardcoded fallback
+        require_cvar=True,
+        mc_metadata=None,  # no MC evidence
+    )
+    assert dec.outcome == VET_VETO
+    assert "cvar_95" in dec.missing
+    assert any("fallback" in r.detail.lower() for r in dec.reasons)
+
+
+def test_hardcoded_cvar_28_fallback_vetoes():
+    """CVaR=28.0 (hardcoded fallback) without MC evidence → VETO."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=28.0,  # hardcoded fallback
+        require_cvar=True,
+        mc_metadata={},  # empty metadata, no MC evidence
+    )
+    assert dec.outcome == VET_VETO
+    assert "cvar_95" in dec.missing
+    assert any("fallback" in r.detail.lower() for r in dec.reasons)
+
+
+def test_cvar_20_with_mc_evidence_passes():
+    """CVaR=20.0 WITH MC evidence (paths > 0) → ALLOW."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=20.0,
+        require_cvar=True,
+        mc_metadata={"paths": 10000, "simulations": 252},  # MC ran
+    )
+    assert dec.outcome == VET_ALLOW
+
+
+def test_cvar_28_with_mc_evidence_passes():
+    """CVaR=28.0 WITH MC evidence (simulations > 0) → ALLOW."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=28.0,
+        require_cvar=True,
+        mc_metadata={"n_simulations": 1000, "n_paths": 5000},
+    )
+    assert dec.outcome == VET_ALLOW
+
+
+def test_cvar_fallback_flag_vetoes():
+    """CVaR with explicit fallback flag → VETO."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=20.0,
+        require_cvar=True,
+        mc_metadata={"paths": 10000, "is_fallback": True},  # explicit fallback flag
+    )
+    assert dec.outcome == VET_VETO
+    assert "cvar_95" in dec.missing
+
+
+def test_cvar_non_fallback_value_passes():
+    """CVaR not in {20.0, 28.0} → no fallback check needed."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        cvar_95=22.5,  # not a fallback value
+        require_cvar=True,
+        mc_metadata=None,  # no metadata needed for non-fallback values
+    )
+    assert dec.outcome == VET_ALLOW
+
+
 if __name__ == "__main__":
     test_missing_var_vetoes()
     test_missing_regime_vetoes()
@@ -502,4 +603,10 @@ if __name__ == "__main__":
     test_existing_position_no_concentration_veto()
     test_veto_object_schema()
     test_veto_object_decision_is_veto_not_rationale()
+    test_hardcoded_cvar_20_fallback_vetoes()
+    test_hardcoded_cvar_28_fallback_vetoes()
+    test_cvar_20_with_mc_evidence_passes()
+    test_cvar_28_with_mc_evidence_passes()
+    test_cvar_fallback_flag_vetoes()
+    test_cvar_non_fallback_value_passes()
     print("All risk gate tests passed.")

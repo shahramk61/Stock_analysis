@@ -235,20 +235,53 @@ def _check_var_thresholds(
     return None, 1.0
 
 
-def _check_cvar(cvar_95: Any) -> Optional[VetoReason]:
+def _check_cvar(cvar_95: Any, mc_metadata: Optional[Dict[str, Any]] = None) -> Optional[VetoReason]:
     """
-    CVaR check: if present and finite, pass. If absent → VETO (fail closed).
-    Quant must emit cvar_95 field for tail risk assessment.
+    CVaR check: must be from actual Monte Carlo sim, not fallback.
+    
+    Hard rule from CoS/Quant:
+    - cvar_95 is valid ONLY when MC sim actually ran
+    - If cvar_95 in {20.0, 28.0} (old helper fallbacks) without MC evidence → treat as missing
+    - Missing CVaR → VETO (fail closed)
+    
+    MC evidence: mc_metadata with paths/simulations count or non-fallback flag.
     """
-    # If CVaR is provided and finite, accept it (no threshold enforced yet; defer to PM)
-    if _is_finite(cvar_95):
-        return None
-    # If CVaR is missing, fail closed
-    return VetoReason(
-        category="missing_cvar",
-        detail="cvar_95 missing or non-finite (Quant pipeline must emit CVaR)",
-        severity=VET_VETO,
-    )
+    # If CVaR is missing or non-finite, fail closed
+    if not _is_finite(cvar_95):
+        return VetoReason(
+            category="missing_cvar",
+            detail="cvar_95 missing or non-finite (Quant pipeline must emit CVaR from MC sim)",
+            severity=VET_VETO,
+        )
+    
+    cvar_val = float(cvar_95)
+    
+    # Detect hardcoded fallback values (20.0, 28.0) without MC evidence
+    is_fallback_value = abs(cvar_val - 20.0) < 0.01 or abs(cvar_val - 28.0) < 0.01
+    
+    if is_fallback_value:
+        # Check for MC evidence
+        mc_ran = False
+        if mc_metadata and isinstance(mc_metadata, dict):
+            # Evidence: paths > 0, simulations > 0, or explicit non-fallback flag
+            paths = mc_metadata.get("paths") or mc_metadata.get("n_paths") or 0
+            sims = mc_metadata.get("simulations") or mc_metadata.get("n_simulations") or 0
+            is_fallback_flag = mc_metadata.get("is_fallback") or mc_metadata.get("fallback")
+            
+            # If we have paths/sims and no fallback flag, MC ran
+            if (paths > 0 or sims > 0) and not is_fallback_flag:
+                mc_ran = True
+        
+        if not mc_ran:
+            # Hardcoded fallback without MC evidence → treat as missing
+            return VetoReason(
+                category="missing_cvar",
+                detail=f"cvar_95={cvar_val} is hardcoded fallback (no MC sim evidence); treat as missing",
+                severity=VET_VETO,
+            )
+    
+    # CVaR present and either not a fallback value or has MC evidence
+    return None
 
 
 def _check_memory(memory_snapshot: Optional[Dict[str, Any]]) -> Tuple[Optional[VetoReason], float]:
@@ -376,6 +409,7 @@ def vet_trade(
     fundamentals_pit: bool = True,
     proposed_notional: float = 0.0,
     require_cvar: bool = False,
+    mc_metadata: Optional[Dict[str, Any]] = None,
 ) -> RiskDecision:
     """
     Risk veto gate: ALLOW / CUT / VETO a proposed trade.
@@ -398,7 +432,7 @@ def vet_trade(
         asof: point-in-time date (YYYY-MM-DD)
         proposed_risk_pct: base risk % from policy (before risk cuts)
         var_95: VaR 95% from mc_risk pipeline (required, fail closed if missing)
-        cvar_95: CVaR 95% from pipeline (optional; if require_cvar=True → fail closed)
+        cvar_95: CVaR 95% from MC sim (optional; if require_cvar=True → fail closed)
         regime: regime from signals.regime.regime (required, fail closed if missing)
         structural_breakdown: death cross / Bearish stack (affects high VaR veto)
         clear_uptrend: Bullish stack / golden cross (high VaR can trade small if True)
@@ -409,6 +443,7 @@ def vet_trade(
         fundamentals_pit: False if non-PIT fundamentals used in replay (VETO)
         proposed_notional: proposed notional for this trade (for concentration)
         require_cvar: if True, missing CVaR → VETO (default False; opt-in)
+        mc_metadata: Monte Carlo metadata (paths, simulations, fallback flags) to verify CVaR validity
 
     Returns:
         RiskDecision with outcome (ALLOW/CUT/VETO), final risk_pct, reasons, missing fields.
@@ -476,9 +511,9 @@ def vet_trade(
             severity=VET_CUT,
         ))
 
-    # 5) CVaR (opt-in fail-closed)
+    # 5) CVaR (opt-in fail-closed, detects hardcoded fallbacks)
     if require_cvar:
-        cvar_reason = _check_cvar(cvar_95)
+        cvar_reason = _check_cvar(cvar_95, mc_metadata=mc_metadata)
         if cvar_reason:
             reasons.append(cvar_reason)
             missing.append("cvar_95")
