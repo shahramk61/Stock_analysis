@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1.0",
+  "asof": null,
+  "book_ready": false,
+  "nav_known": false,
+  "nav_usd": null,
+  "nav_source": null,
+  "open_risk": {
+    "names": [],
+    "name_count": 0,
+    "weights": null
+  },
+  "capacity": {
+    "new_risk": "FLAT",
+    "reason": "no book → stay flat on new risk"
+  },
+  "live_broker": false,
+  "notes": "Paper book is empty. Trader should not propose new risk until Shahram seeds NAV/positions."
+}

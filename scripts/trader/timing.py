@@ -6,6 +6,9 @@ Combines session clock, horizon, levels, and gate to answer:
 - Session vs swing
 - Entry/stop/exit levels
 - Would Execute be flat after timing + tape + memory?
+
+PM book: Reads trader_snapshot.json from default path or --book-snapshot CLI flag.
+Default path: /home/box/agent-data/agents/1dfbe69b-fbce-4eab-84f8-b41da3912a08/book/trader_snapshot.json
 """
 
 from __future__ import annotations
@@ -22,6 +25,10 @@ from .session_clock import get_session_state, MarketSession, SessionState
 from .horizon import choose_horizon, Horizon, HorizonChoice
 from .levels import compute_levels, TradeLevels
 from .gate import gate_execution, ExecuteGate
+
+
+# PM trader_snapshot default path (may not exist on cloud VM)
+DEFAULT_TRADER_SNAPSHOT_PATH = Path("/home/box/agent-data/agents/1dfbe69b-fbce-4eab-84f8-b41da3912a08/book/trader_snapshot.json")
 
 
 @dataclass
@@ -222,6 +229,29 @@ def load_handoff_json(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def load_trader_snapshot(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """
+    Load PM trader_snapshot.json.
+    
+    Args:
+        path: Explicit path to snapshot, or None to use default
+    
+    Returns:
+        Snapshot dict if file exists, None otherwise (fail closed)
+    """
+    snapshot_path = path or DEFAULT_TRADER_SNAPSHOT_PATH
+    
+    if not snapshot_path.exists():
+        return None
+    
+    try:
+        with open(snapshot_path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        # File exists but can't read → fail closed
+        return None
+
+
 def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
     """Extract timing-relevant facts from handoff JSON."""
     signals = handoff.get("signals") or {}
@@ -327,14 +357,19 @@ def main():
         help="Risk veto reason text",
     )
     parser.add_argument(
+        "--book-snapshot",
+        type=Path,
+        help=f"Path to PM trader_snapshot.json (default: {DEFAULT_TRADER_SNAPSHOT_PATH} if exists)",
+    )
+    parser.add_argument(
         "--book-ready",
         action="store_true",
-        help="PM book ready flag (default False)",
+        help="[DEPRECATED] PM book ready flag (use --book-snapshot instead)",
     )
     parser.add_argument(
         "--starting-cash",
         type=float,
-        help="PM book starting cash",
+        help="[DEPRECATED] PM book starting cash (use --book-snapshot instead)",
     )
     parser.add_argument(
         "--output",
@@ -342,6 +377,18 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # Load PM trader_snapshot (default path or explicit)
+    book_snapshot_path = args.book_snapshot
+    if book_snapshot_path is None and DEFAULT_TRADER_SNAPSHOT_PATH.exists():
+        # Auto-load from default path if it exists
+        book_snapshot_path = DEFAULT_TRADER_SNAPSHOT_PATH
+    
+    book = None
+    if book_snapshot_path:
+        book = load_trader_snapshot(book_snapshot_path)
+        if book is None and book_snapshot_path is not None:
+            print(f"Warning: Failed to load trader_snapshot from {book_snapshot_path}", file=sys.stderr)
     
     # Load facts from handoff or CLI args
     if args.handoff:
@@ -352,6 +399,10 @@ def main():
         
         handoff = load_handoff_json(handoff_path)
         facts = extract_facts_from_handoff(handoff)
+        
+        # Override book from snapshot if loaded
+        if book is not None:
+            facts["book"] = book
         
         # CLI args can override handoff
         if args.current_price is not None:
@@ -374,13 +425,13 @@ def main():
                 "risk_pct": args.risk_veto_risk_pct,
             }
         
-        # Build book from CLI args if provided
-        book = None
-        if args.book_ready or args.starting_cash is not None:
+        # Use book from snapshot, or build deprecated simple book from CLI args
+        if book is None and (args.book_ready or args.starting_cash is not None):
+            # DEPRECATED: simple book from CLI args
             book = {
                 "book_ready": bool(args.book_ready),
                 "starting_cash": args.starting_cash,
-                "positions": [],  # Empty from CLI (full book from handoff)
+                "positions": [],
                 "open_risk_pct": None,
             }
         

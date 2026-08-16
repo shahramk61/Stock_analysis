@@ -8,10 +8,12 @@ Gate hierarchy (all fail closed):
    - VETO → flat, risk = 0
    - CUT → use risk_veto.risk_pct, keep long only if policy constructive
    - ALLOW → proceed
-1. PM book (fail closed)
-   - book_ready false/missing → flat on NEW risk
-   - starting_cash missing/null/0 and no positions → no add
-   - Don't invent book
+1. PM book (fail closed) - from trader_snapshot.json
+   - book_ready false → flat on NEW risk
+   - nav_known false → flat on NEW risk
+   - capacity.new_risk is FLAT → flat
+   - nav_usd null → flat on NEW risk
+   - Don't invent nav_usd, positions, or headroom
 2. Policy flat → stay flat
 3. Memory block → flat
 4. Session closed → flat
@@ -83,7 +85,7 @@ def gate_execution(
     
     Gate hierarchy (all fail closed):
     0. Risk veto: missing/VETO/CUT(null risk_pct) → flat
-    1. PM book: book_ready false/missing → flat on NEW risk
+    1. PM book (trader_snapshot.json): book_ready false OR nav_known false OR capacity.new_risk FLAT OR nav_usd null → flat
     2. Policy flat → flat
     3. Memory block → flat
     4. Session closed → flat
@@ -94,7 +96,7 @@ def gate_execution(
         dual_recommendation: Dual research/execute labels
         decision_memory: Memory dict (from memory.apply_to_policy_inputs)
         risk_veto: Risk veto object (decision, reason, missing, risk_pct)
-        book: PM book object (book_ready, starting_cash, positions, open_risk_pct)
+        book: PM trader_snapshot.json (book_ready, nav_known, nav_usd, capacity.new_risk, etc.)
         session: Market session status
         levels: Trade levels with tape validity
     
@@ -268,7 +270,10 @@ def gate_execution(
         )
     
     # Book ready - continue
-    reasons.append(f"PM book: ready (cash={book.get('starting_cash')}, positions={len(book.get('positions', []))})")
+    nav_usd = book.get("nav_usd") if book else None
+    capacity = book.get("capacity") or {} if book else {}
+    new_risk_cap = capacity.get("new_risk") if isinstance(capacity, dict) else None
+    reasons.append(f"PM book: ready (nav=${nav_usd}, capacity={new_risk_cap})")
     
     # Gate 2: Policy already flat
     if proposed_action == "flat":
@@ -403,43 +408,51 @@ def _is_policy_conflict(research_label: Optional[str], execute_action: str) -> b
 
 def _is_book_ready(book: Optional[Dict[str, Any]]) -> bool:
     """
-    Check if PM book is ready for NEW risk.
+    Check if PM trader_snapshot allows NEW risk.
     
-    Rules:
-    - book_ready must be explicitly True
-    - Don't treat missing/empty as "room to add"
-    - starting_cash or positions must exist (not both null/0/empty)
+    Schema: /home/box/agent-data/agents/.../book/trader_snapshot.json
     
-    Returns False if:
-    - book is None or not a dict
-    - book_ready is False, missing, or not True
-    - starting_cash is null/0 AND positions is empty/missing
+    Fail-closed rules:
+    - book_ready must be True
+    - nav_known must be True
+    - capacity.new_risk must NOT be "FLAT"
+    - nav_usd must be non-null and finite
+    
+    Returns False if any condition fails (fail closed for NEW risk).
     """
     if not book or not isinstance(book, dict):
         return False
     
-    # book_ready must be explicitly True
+    # book_ready must be True
     if book.get("book_ready") is not True:
         return False
     
-    # Must have starting_cash or positions (not both null/0/empty)
-    starting_cash = book.get("starting_cash")
-    positions = book.get("positions") or []
+    # nav_known must be True
+    if book.get("nav_known") is not True:
+        return False
     
-    has_cash = starting_cash is not None and _is_finite(starting_cash) and float(starting_cash) > 0
-    has_positions = isinstance(positions, list) and len(positions) > 0
+    # nav_usd must be non-null and finite
+    nav_usd = book.get("nav_usd")
+    if nav_usd is None or not _is_finite(nav_usd):
+        return False
     
-    if not has_cash and not has_positions:
-        # No cash and no positions → no book
+    # capacity.new_risk must NOT be "FLAT"
+    capacity = book.get("capacity") or {}
+    if isinstance(capacity, dict):
+        new_risk_cap = str(capacity.get("new_risk") or "FLAT").upper()
+        if new_risk_cap == "FLAT":
+            return False
+    else:
+        # Missing capacity → fail closed
         return False
     
     return True
 
 
 def _book_not_ready_reason(book: Optional[Dict[str, Any]]) -> str:
-    """Generate reason why book is not ready."""
+    """Generate reason why PM trader_snapshot blocks NEW risk."""
     if not book or not isinstance(book, dict):
-        return "book missing - fail closed (no add)"
+        return "trader_snapshot missing - fail closed (no add)"
     
     if book.get("book_ready") is False:
         return "book_ready=false - no NEW risk"
@@ -450,14 +463,27 @@ def _book_not_ready_reason(book: Optional[Dict[str, Any]]) -> str:
     if book.get("book_ready") is not True:
         return f"book_ready={book.get('book_ready')} (not True) - fail closed"
     
-    # book_ready is True but no cash/positions
-    starting_cash = book.get("starting_cash")
-    positions = book.get("positions") or []
-    has_cash = starting_cash is not None and _is_finite(starting_cash) and float(starting_cash) > 0
-    has_positions = isinstance(positions, list) and len(positions) > 0
+    if book.get("nav_known") is False:
+        return "nav_known=false - no NEW risk"
     
-    if not has_cash and not has_positions:
-        return f"book_ready but no starting_cash (${starting_cash}) and no positions - no add"
+    if book.get("nav_known") is not True:
+        return f"nav_known={book.get('nav_known')} (not True) - fail closed"
+    
+    nav_usd = book.get("nav_usd")
+    if nav_usd is None:
+        return "nav_usd=null - no NEW risk"
+    
+    if not _is_finite(nav_usd):
+        return f"nav_usd={nav_usd} (not finite) - fail closed"
+    
+    capacity = book.get("capacity") or {}
+    if not isinstance(capacity, dict):
+        return "capacity missing - fail closed"
+    
+    new_risk_cap = str(capacity.get("new_risk") or "FLAT").upper()
+    if new_risk_cap == "FLAT":
+        reason = capacity.get("reason") or "no book → stay flat on new risk"
+        return f"capacity.new_risk=FLAT: {reason}"
     
     return "book not ready"
 

@@ -20,12 +20,25 @@ from trader.gate import gate_execution, normalize_action  # noqa: E402
 from trader.timing import build_timing_card  # noqa: E402
 
 
-# Valid book for testing (PM book ready)
+# Valid book for testing (PM trader_snapshot ready)
 _VALID_BOOK = {
+    "schema_version": "0.1.0",
+    "asof": "2026-08-16T10:00:00Z",
     "book_ready": True,
-    "starting_cash": 100000.0,
-    "positions": [],
-    "open_risk_pct": 0.0,
+    "nav_known": True,
+    "nav_usd": 100000.0,
+    "nav_source": "simulated",
+    "open_risk": {
+        "names": [],
+        "name_count": 0,
+        "weights": None
+    },
+    "capacity": {
+        "new_risk": "ALLOW",
+        "reason": "NAV seeded, room for new positions"
+    },
+    "live_broker": False,
+    "notes": "Test fixture with NAV ready"
 }
 
 def test_weekend_closed():
@@ -479,10 +492,14 @@ def test_book_ready_false_blocks():
     session = get_session_state(mon_open)
     
     book = {
+        "schema_version": "0.1.0",
         "book_ready": False,
-        "starting_cash": 100000.0,
-        "positions": [],
-        "open_risk_pct": 0.0,
+        "nav_known": False,
+        "nav_usd": None,
+        "capacity": {
+            "new_risk": "FLAT",
+            "reason": "no book → stay flat on new risk"
+        },
     }
     
     gate = gate_execution(
@@ -515,19 +532,23 @@ def test_book_missing_blocks():
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
     assert gate.book_blocks is True
-    assert any("book missing" in r.lower() for r in gate.reasons)
+    assert any("snapshot missing" in r.lower() for r in gate.reasons)
 
 
-def test_book_no_cash_no_positions_blocks():
-    """book_ready=True but no cash and no positions → no add."""
+def test_book_nav_unknown_blocks():
+    """nav_known=false → flat on NEW risk."""
     mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
     session = get_session_state(mon_open)
     
     book = {
+        "schema_version": "0.1.0",
         "book_ready": True,
-        "starting_cash": 0.0,  # No cash
-        "positions": [],  # No positions
-        "open_risk_pct": 0.0,
+        "nav_known": False,  # NAV unknown
+        "nav_usd": None,
+        "capacity": {
+            "new_risk": "ALLOW",
+            "reason": "Would allow if NAV was known"
+        },
     }
     
     gate = gate_execution(
@@ -541,25 +562,79 @@ def test_book_no_cash_no_positions_blocks():
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
     assert gate.book_blocks is True
-    assert any("no starting_cash" in r.lower() or "no add" in r.lower() for r in gate.reasons)
+    assert any("nav_known" in r.lower() for r in gate.reasons)
 
 
-def test_book_ready_with_cash_passes():
-    """book_ready=True with starting_cash → book gate passes."""
+def test_book_nav_null_blocks():
+    """nav_usd=null → flat on NEW risk."""
     mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
     session = get_session_state(mon_open)
     
     book = {
+        "schema_version": "0.1.0",
         "book_ready": True,
-        "starting_cash": 100000.0,
-        "positions": [],
-        "open_risk_pct": 0.0,
+        "nav_known": True,
+        "nav_usd": None,  # NAV null
+        "capacity": {
+            "new_risk": "ALLOW",
+            "reason": "Would allow if NAV was set"
+        },
     }
     
     gate = gate_execution(
         policy_hint={"action": "long"},
         risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.book_blocks is True
+    assert any("nav_usd" in r.lower() for r in gate.reasons)
+
+
+def test_book_capacity_flat_blocks():
+    """capacity.new_risk=FLAT → flat."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    book = {
+        "schema_version": "0.1.0",
+        "book_ready": True,
+        "nav_known": True,
+        "nav_usd": 100000.0,
+        "capacity": {
+            "new_risk": "FLAT",  # Capacity says FLAT
+            "reason": "Max positions reached"
+        },
+    }
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=book,
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.book_blocks is True
+    assert any("capacity.new_risk=flat" in r.lower() for r in gate.reasons)
+
+
+def test_book_ready_with_cash_passes():
+    """book_ready=True, nav_known=True, nav_usd set, capacity ALLOW → book gate passes."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    # Use _VALID_BOOK (already matches trader_snapshot schema)
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        book=_VALID_BOOK,
         session=session,
         levels=compute_levels(current_price=100.0),
     )
@@ -571,15 +646,25 @@ def test_book_ready_with_cash_passes():
 
 
 def test_book_ready_with_positions_passes():
-    """book_ready=True with positions (even no cash) → book gate passes."""
+    """book_ready=True with NAV even with positions → book gate passes."""
     mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
     session = get_session_state(mon_open)
     
     book = {
+        "schema_version": "0.1.0",
         "book_ready": True,
-        "starting_cash": None,  # No cash
-        "positions": [{"ticker": "SPY", "shares": 100}],  # But has positions
-        "open_risk_pct": 2.0,
+        "nav_known": True,
+        "nav_usd": 100000.0,
+        "nav_source": "simulated",
+        "open_risk": {
+            "names": ["SPY"],
+            "name_count": 1,
+            "weights": [0.02]
+        },
+        "capacity": {
+            "new_risk": "ALLOW",
+            "reason": "Room for more positions"
+        },
     }
     
     gate = gate_execution(
@@ -612,8 +697,8 @@ def test_book_dont_synthesize():
     
     assert gate.book_blocks is True
     assert gate.execute_action == "flat"
-    # Ensure we didn't invent cash or positions
-    assert any("book missing" in r.lower() for r in gate.reasons)
+    # Ensure we didn't invent NAV or capacity
+    assert any("snapshot missing" in r.lower() for r in gate.reasons)
 
 
 # ============================================================================
@@ -922,7 +1007,9 @@ if __name__ == "__main__":
     # PM book tests
     test_book_ready_false_blocks()
     test_book_missing_blocks()
-    test_book_no_cash_no_positions_blocks()
+    test_book_nav_unknown_blocks()
+    test_book_nav_null_blocks()
+    test_book_capacity_flat_blocks()
     test_book_ready_with_cash_passes()
     test_book_ready_with_positions_passes()
     test_book_dont_synthesize()
