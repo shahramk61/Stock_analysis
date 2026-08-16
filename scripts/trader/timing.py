@@ -166,6 +166,7 @@ def build_timing_card(
         session=session,
         levels=levels,
         overall_score=overall_score,
+        execution_mode=execution_mode,  # For swing/daily: skip session gate
     )
     
     # 5. Now a trade? (all must pass)
@@ -307,9 +308,13 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
 def main():
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Trader timing CLI - answers if now is actually a trade"
+        description="Trader timing CLI - answers if now is actually a trade. For July 2026 paper run: --universe tickers.txt --asof 2026-07-01 (daily swing replay)."
     )
-    parser.add_argument("ticker", help="Ticker symbol")
+    parser.add_argument("ticker", nargs="?", help="Ticker symbol (or use --universe for multiple tickers)")
+    parser.add_argument(
+        "--universe",
+        help="Path to universe file (one ticker per line) for multi-ticker replay",
+    )
     parser.add_argument(
         "--handoff",
         help="Path to handoff JSON from prepare_decision_handoff.py",

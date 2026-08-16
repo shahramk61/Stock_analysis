@@ -1,14 +1,26 @@
 """
-Execute gate: combine risk_veto, PM book, policy_hint, dual_recommendation, 
-decision memory, session clock, and tape quality.
+Execute gate: combine risk_veto (Risk PR #4), PM book, policy_hint, 
+dual_recommendation, decision memory, session clock, and tape quality.
+
+Risk veto schema (from scripts/risk/gate.py, PR #4):
+{
+  "decision": "ALLOW" | "CUT" | "VETO",
+  "reason": "<one-line>",
+  "reasons": ["..."],
+  "missing": ["var_95", ...],
+  "risk_pct": 0.01,
+  "action": "long" | "flat",
+  "ticker": "AAPL",
+  "asof": "2026-07-15"
+}
 
 Gate hierarchy (all fail closed):
-0. Risk veto (fail closed)
-   - Missing/invalid → flat
-   - VETO → flat, risk = 0
-   - CUT → use risk_veto.risk_pct, keep long only if policy constructive
-   - ALLOW → proceed
-1. PM book (fail closed) - from trader_snapshot.json
+0. Risk veto (fail closed) - branch on decision ONLY, never parse reason text
+   - Missing/invalid → flat on NEW risk
+   - VETO → flat, risk = 0 (flatten / do not enter)
+   - CUT → use risk_veto.risk_pct (already reduced). Missing/null risk_pct → flat
+   - ALLOW → proceed (still need Quant last_print, Execute long, other gates)
+1. PM book (fail closed) - from book.json or trader_snapshot.json
    - book_ready false → flat on NEW risk
    - nav_known false → flat on NEW risk
    - capacity.new_risk is FLAT → flat
@@ -19,8 +31,12 @@ Gate hierarchy (all fail closed):
    - Blank string "" is NOT valid → treat as missing
    - Don't invent journal rows to clear cooldown
 3. Policy flat → stay flat
-4. Session closed → flat
-5. Tape invalid (missing last_print) → flat
+4. Session closed → flat (SKIP for swing/daily replay - no intraday gating)
+5. Tape invalid (missing last_print = asof Close ≤ asof) → flat
+
+July 2026 paper run: daily swing replay, asof Close only, no session clock gate, no hindsight.
+Missing Quant numbers → Risk will VETO → stay flat.
+No fills until ALLOW + last_print exist.
 
 Research BUY must never become a long when Execute is FLAT.
 """
@@ -82,6 +98,7 @@ def gate_execution(
     session: Optional[MarketSession] = None,
     levels: Optional[TradeLevels] = None,
     overall_score: float = 50.0,
+    execution_mode: Optional[str] = None,  # For swing/daily: skip session gate
 ) -> ExecuteGate:
     """
     Gate execution based on risk_veto, PM book, policy, memory, session clock, and tape.
@@ -315,19 +332,25 @@ def gate_execution(
             reasons.append(f"memory block: {flags}")
     
     # Gate 4: Session clock (market closed → no new risk)
-    if session:
-        if not session.allows_new_trades:
-            session_blocks = True
-            blocks.append(f"session closed: {session.reason}")
-            reasons.append(f"session gate: {session.reason}")
+    # SKIP for swing/daily: no intraday gating for daily rebalance (July replay)
+    if execution_mode in ("swing", "daily"):
+        # Swing/daily: skip session gate (daily rebalance, not intraday)
+        reasons.append(f"Session gate: SKIPPED for {execution_mode} (daily rebalance, not intraday)")
     else:
-        # No session provided → check now
-        from .session_clock import get_session_state
-        session = get_session_state()
-        if not session.allows_new_trades:
-            session_blocks = True
-            blocks.append(f"session closed: {session.reason}")
-            reasons.append(f"session gate: {session.reason}")
+        # Session mode: apply intraday session gating
+        if session:
+            if not session.allows_new_trades:
+                session_blocks = True
+                blocks.append(f"session closed: {session.reason}")
+                reasons.append(f"session gate: {session.reason}")
+        else:
+            # No session provided → check now
+            from .session_clock import get_session_state
+            session = get_session_state()
+            if not session.allows_new_trades:
+                session_blocks = True
+                blocks.append(f"session closed: {session.reason}")
+                reasons.append(f"session gate: {session.reason}")
     
     # Gate 5: Tape quality (missing or stale price)
     if levels:
