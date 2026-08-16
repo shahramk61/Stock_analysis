@@ -14,6 +14,34 @@ This package provides Quant's first measurement layer for Stock Analysis:
 - **Measurement-only**: No trade recommendations, no entry decisions, no policy changes
 - **Forecasts off by default**: Multi-horizon ML forecasts are research-only and opt-in
 
+## Fund Tools (NEW)
+
+**See `scripts/quant/fund/README.md` for detailed documentation.**
+
+The fund tools extend Quant measurement for paper thematic fund management:
+
+1. **Asof marks** — Every score, conviction, ticket state carries asof (date) and source
+2. **CIO tracker** — Read-only ledger with per-name scores, conviction, last_print, var_95/cvar_95
+3. **Five-year model** — Honest support (unavailable if no PIT revenues, never fabricated)
+4. **PM ticket replay** — Walk-forward of buy/add/trim/sell/rebalance with attribution
+
+**Quant does NOT**: pick themes, issue tickets, invent conviction or prices.
+
+Quick example:
+
+```bash
+# Get latest tracker state
+python -m scripts.quant.fund.cli tracker-latest \
+  --tickers AAPL,MSFT \
+  --asof 2023-12-31 \
+  --output tracker.json
+
+# Replay PM tickets
+python -m scripts.quant.fund.cli replay-tickets \
+  --tickets-file pm_tickets.json \
+  --output replay.json
+```
+
 ## What This Proves
 
 ### ✓ Point-in-Time Scoring Works
@@ -31,6 +59,12 @@ This package provides Quant's first measurement layer for Stock Analysis:
 - Runtime guard: catches live `Ticker.info`, `.financials`, `.balance_sheet`, etc. during guarded execution
 - Static audit: scans code for known leaking helpers (Altman, Piotroski, quality, earnings, info dict accesses)
 - Tests prove: if a helper fetches live yfinance fundamentals, the guard FAILS
+
+### ✓ Fund Tools Are Asof-Safe (NEW)
+- Every tracker entry has asof mark; future bars don't change past scores
+- Five-year model returns unavailable without PIT revenues (never fabricates)
+- Ticket replay: no bar available = unfilled (no invented price)
+- Tests prove: asof integrity, no placeholders, honest unavailable
 
 ## What Is Still Leaking
 
