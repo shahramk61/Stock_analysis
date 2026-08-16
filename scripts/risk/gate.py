@@ -538,7 +538,7 @@ def vet_trade(
         asof: point-in-time date (YYYY-MM-DD)
         proposed_risk_pct: base risk % from policy (before risk cuts)
         var_95: VaR 95% from mc_risk pipeline (required, fail closed if missing)
-        cvar_95: CVaR 95% from MC sim (optional; if require_cvar=True → fail closed)
+        cvar_95: CVaR 95% from MC sim (REQUIRED; missing → VETO)
         regime: regime from signals.regime.regime (required, fail closed if missing)
         structural_breakdown: death cross / Bearish stack (affects high VaR veto)
         clear_uptrend: Bullish stack / golden cross (high VaR can trade small if True)
