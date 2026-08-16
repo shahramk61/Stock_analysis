@@ -127,6 +127,30 @@ class Book:
             if pos.is_option_sleeve():
                 total += pos.weight_pct
         return total
+    
+    def core_notional(self) -> float:
+        """
+        Total notional $ for core positions (NOT option sleeve).
+        
+        Core = positions that are NOT marked as option sleeve.
+        """
+        total = 0.0
+        for pos in self.positions:
+            if not pos.is_option_sleeve():
+                total += pos.notional
+        return total
+    
+    def sleeve_notional(self) -> float:
+        """
+        Total notional $ for option sleeve positions.
+        
+        Sleeve = positions marked as option_sleeve=True or hurdle_15pct="miss".
+        """
+        total = 0.0
+        for pos in self.positions:
+            if pos.is_option_sleeve():
+                total += pos.notional
+        return total
 
 
 class RiskDecision:
@@ -295,6 +319,9 @@ def check_book_constraints(
                 cio_approved=cio_approved,
             )
         
+        # Check sleeve-core balance breach (FLAG if in breach, never BLOCK HOLD)
+        _check_sleeve_core_balance_flag(book, decision)
+        
         # Add book completeness flag if applicable (never BLOCK)
         _check_book_completeness_flag(book, decision, cio_sized, cash_memo)
         return decision
@@ -318,6 +345,11 @@ def check_book_constraints(
             missing=missing,
         )
         
+        # Check sleeve-core balance breach for ALLOW decisions (FLAG if in breach)
+        # For BLOCK decisions, skip (already blocked for another reason)
+        if decision.decision == "ALLOW":
+            _check_sleeve_core_balance_flag(book, decision)
+        
         # Add book completeness flag if decision is ALLOW (never BLOCK)
         if decision.decision == "ALLOW":
             _check_book_completeness_flag(book, decision, cio_sized, cash_memo)
@@ -335,6 +367,10 @@ def check_book_constraints(
             missing=missing,
             cio_approved=cio_approved,
         )
+        
+        # Check sleeve-core balance breach for ALLOW/FLAG decisions
+        if decision.decision in ("ALLOW", "FLAG"):
+            _check_sleeve_core_balance_flag(book, decision)
         
         # Add book completeness flag if decision is ALLOW or FLAG (never BLOCK)
         if decision.decision in ("ALLOW", "FLAG"):
@@ -448,6 +484,24 @@ def _check_buy_add_constraints(
                     f"Option sleeve exposure {post_trade_option_sleeve:.1f}% exceeds "
                     f"limit {limits.MAX_OPTION_SLEEVE_PCT}% (names missing 15% hurdle)"
                 )
+        
+        # Sleeve-core balance: sleeve $ may not exceed core $
+        # Desk-locked 2026-08-16: maintain sleeve ≤ core balance
+        if proposed_notional is not None:
+            current_core = book.core_notional()
+            current_sleeve = book.sleeve_notional()
+            
+            if is_option_sleeve_name:
+                # Adding to sleeve
+                post_trade_sleeve = current_sleeve + proposed_notional
+                post_trade_core = current_core
+                
+                if post_trade_sleeve > post_trade_core:
+                    reasons.append(
+                        f"Sleeve ${post_trade_sleeve:,.2f} would exceed core ${post_trade_core:,.2f} "
+                        "(sleeve dollars may not exceed core dollars)"
+                    )
+            # Note: if adding to core, we don't need to check since it can only improve the ratio
         
         # Cash constraint
         post_trade_cash_pct = book.cash_pct
@@ -680,3 +734,42 @@ def _check_book_completeness_flag(
             
             # Add to reasons list (always append)
             decision.reasons.append(completeness_msg)
+
+
+def _check_sleeve_core_balance_flag(
+    book: Book,
+    decision: RiskDecision,
+) -> None:
+    """
+    Add sleeve-core balance FLAG if sleeve $ > core $.
+    
+    Desk-locked 2026-08-16: sleeve dollars may not exceed core dollars.
+    
+    If book is already in breach (sleeve > core):
+    - FLAG the book (warning)
+    - Do NOT flatten, do NOT force SELL
+    - HOLDs and CIO-approved holds pass through (not blocked)
+    
+    This mutates the decision in place to add the flag.
+    """
+    current_core = book.core_notional()
+    current_sleeve = book.sleeve_notional()
+    
+    if current_sleeve > current_core:
+        # Book is in breach: sleeve exceeds core
+        balance_msg = (
+            f"Sleeve-core balance breach: sleeve ${current_sleeve:,.2f} > core ${current_core:,.2f} "
+            "(sleeve dollars may not exceed core dollars; awaiting CIO trim sleeve or add core)"
+        )
+        
+        # Add FLAG (never BLOCK, never flatten)
+        # If decision was ALLOW, upgrade to FLAG
+        if decision.decision == "ALLOW":
+            decision.decision = "FLAG"
+            decision.reason = balance_msg
+        # If already FLAG, keep FLAG but add balance to reasons
+        elif decision.decision == "FLAG":
+            pass
+        
+        # Add to reasons list (always append)
+        decision.reasons.append(balance_msg)

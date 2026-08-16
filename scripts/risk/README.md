@@ -40,6 +40,7 @@ Defined in `scripts/risk/limits.py`:
 | Max sector/theme | 25% of NAV | Post-trade exposure |
 | Max factor cluster | 35% of NAV | Correlated positions (requires correlation data for multi-name ADD) |
 | **Max option sleeve** | **20% of NAV** | **Names marked by Coverage/CIO as missing 15% five-year hurdle** |
+| **Sleeve ≤ core balance** | **Sleeve $ ≤ core $** | **Desk-locked 2026-08-16: sleeve dollars may not exceed core dollars** |
 | Max names | 20 | Total positions in book |
 | Liquidity | Position < ADV / 20 | For liquid exit; fail closed if ADV missing |
 | Theme purity | Required | All positions must have theme tag |
@@ -49,6 +50,7 @@ Defined in `scripts/risk/limits.py`:
 
 - **Fractional shares**: Check dollar weight vs. 10% name cap, not whole-share count. Don't block a BUY if the ticket notional is ≤10% of NAV, even if 1 share costs more than 10% of NAV.
 - **Option sleeve**: Only count positions where Coverage/CIO has marked `option_sleeve=True` OR `hurdle_15pct="miss"`. If the mark is missing, do NOT guess—do not count toward sleeve.
+- **Sleeve-core balance** (desk-locked 2026-08-16): Sleeve $ may not exceed core $. BLOCK sleeve ADD that would make sleeve > core. If book already in breach: FLAG (warning), do NOT flatten, do NOT force SELL. BLOCK further sleeve ADD until balanced (CIO trims sleeve or adds core). HOLDs pass through (not flattened).
 - **Book completeness FLAG** (desk-locked 2026-08-16, Risk postmortem round 2): FLAG when n_names < 5 AND cash_pct > 50% (under-invested). Never BLOCK on this. The FLAG dies (not emitted) when CIO has sized the book (`cio_sized=True`) or written a cash memo (`cash_memo=True`). Default: FLAG (fail closed).
 - **First add exception**: First BUY into a new name does **not** require correlation data
 - **Multi-name ADD**: Requires correlation data to validate factor cluster exposure
@@ -206,6 +208,58 @@ decision2 = check_book_constraints(
 )
 
 assert decision2.decision == "ALLOW"  # No flag
+```
+
+### Sleeve-Core Balance
+
+```python
+# Sleeve-core balance rule (desk-locked 2026-08-16)
+# Sleeve dollars may not exceed core dollars
+
+# Live example: NAV $3000, SYM core $298.90, TSLA sleeve $300, WRD sleeve $300
+positions = [
+    Position("SYM", weight_pct=9.96, notional=298.90, theme="Core", 
+            liquidity_adv=100_000_000),  # Core
+    Position("TSLA", weight_pct=10.0, notional=300, theme="EV",
+            liquidity_adv=150_000_000, option_sleeve=True),  # Sleeve
+    Position("WRD", weight_pct=10.0, notional=300, theme="Speculative",
+            liquidity_adv=80_000_000, option_sleeve=True),  # Sleeve
+]
+book = Book(nav=3000, cash=2101.10, positions=positions, asof="2026-08-16")
+
+# Sleeve $600 > core $298.90 → book is in breach
+book.sleeve_notional()  # → 600.0
+book.core_notional()    # → 298.90
+
+# HOLD on existing position → FLAG (not flatten, not BLOCK)
+decision_hold = check_book_constraints(
+    ticker="TSLA",
+    ticket_type="HOLD",
+    book=book,
+)
+assert decision_hold.decision == "FLAG"
+assert any("sleeve" in r.lower() and "core" in r.lower() for r in decision_hold.reasons)
+# Do NOT flatten to cure the breach
+
+# Further sleeve ADD → BLOCK (can't add more to sleeve until balanced)
+decision_sleeve_add = check_book_constraints(
+    ticker="NEWSLV",
+    ticket_type="BUY",
+    book=book,
+    proposed_notional=100,
+    option_sleeve=True,
+)
+assert decision_sleeve_add.decision == "BLOCK"
+
+# Adding core → ALLOW (helps restore balance)
+decision_core_add = check_book_constraints(
+    ticker="NEWCORE",
+    ticket_type="BUY",
+    book=book,
+    proposed_notional=300,  # 10% NAV
+    option_sleeve=False,  # Core position
+)
+assert decision_core_add.decision in ("ALLOW", "FLAG")  # Not BLOCK
 ```
 
 ### Stranded Book Check (TRIM/SELL)

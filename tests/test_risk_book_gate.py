@@ -815,6 +815,208 @@ class TestBookCompletenessFlag(unittest.TestCase):
         # Should FLAG for completeness
         self.assertEqual(decision.decision, "FLAG")
         self.assertTrue(any("completeness" in r.lower() for r in decision.reasons))
+
+
+class TestSleeveCoreBalance(unittest.TestCase):
+    """Test suite for sleeve-core balance rule (desk-locked 2026-08-16)."""
+    
+    def test_sleeve_add_exceeds_core_blocks(self):
+        """
+        Sleeve ADD that would make sleeve $ > core $ should BLOCK.
+        
+        Rule: sleeve dollars may not exceed core dollars.
+        """
+        # NAV $1000, core $400, sleeve $300
+        positions = [
+            Position("CORE1", weight_pct=20.0, notional=200, theme="Tech", 
+                    liquidity_adv=500000000),  # Core
+            Position("CORE2", weight_pct=20.0, notional=200, theme="Energy", 
+                    liquidity_adv=200000000),  # Core
+            Position("SLEEVE1", weight_pct=30.0, notional=300, theme="Speculative",
+                    liquidity_adv=50000000, option_sleeve=True),  # Sleeve
+        ]
+        book = Book(nav=1000, cash=300, positions=positions, asof="2026-08-16")
+        
+        # Verify current balance: sleeve $300, core $400 → OK
+        self.assertEqual(book.sleeve_notional(), 300)
+        self.assertEqual(book.core_notional(), 400)
+        
+        # Try to add $150 to sleeve → would be $450 sleeve > $400 core → BLOCK
+        decision = check_book_constraints(
+            ticker="SLEEVE2",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=150,
+            theme="Speculative",
+            liquidity_adv=40000000,
+            option_sleeve=True,  # Marked for sleeve
+            correlation_data={"CORE1": 0.2, "CORE2": 0.1, "SLEEVE1": 0.3},
+        )
+        
+        self.assertEqual(decision.decision, "BLOCK")
+        self.assertTrue(any("sleeve" in r.lower() and "core" in r.lower() for r in decision.reasons))
+    
+    def test_existing_breach_hold_flags_not_flatten(self):
+        """
+        Existing breach: sleeve > core already.
+        HOLD should FLAG but not flatten (ALLOW with warning).
+        Further sleeve ADD should BLOCK.
+        
+        Live example: NAV $3000, SYM core $298.90, TSLA sleeve $300, WRD sleeve $300
+        → sleeve $600 > core $298.90 → FLAG, no flatten, BLOCK another sleeve ADD
+        """
+        # Live example from user
+        positions = [
+            Position("SYM", weight_pct=9.96, notional=298.90, theme="Core",
+                    liquidity_adv=100000000),  # Core
+            Position("TSLA", weight_pct=10.0, notional=300, theme="EV",
+                    liquidity_adv=150000000, option_sleeve=True),  # Sleeve
+            Position("WRD", weight_pct=10.0, notional=300, theme="Speculative",
+                    liquidity_adv=80000000, option_sleeve=True),  # Sleeve
+        ]
+        book = Book(nav=3000, cash=2101.10, positions=positions, asof="2026-08-16")
+        
+        # Verify breach: sleeve $600 > core $298.90
+        self.assertAlmostEqual(book.sleeve_notional(), 600, places=2)
+        self.assertAlmostEqual(book.core_notional(), 298.90, places=2)
+        self.assertGreater(book.sleeve_notional(), book.core_notional())
+        
+        # HOLD on existing position → FLAG (not flatten, not BLOCK)
+        decision_hold = check_book_constraints(
+            ticker="TSLA",
+            ticket_type="HOLD",
+            book=book,
+        )
+        
+        # Should FLAG for breach but ALLOW the hold (not flatten)
+        self.assertEqual(decision_hold.decision, "FLAG")
+        self.assertTrue(any("sleeve" in r.lower() and "core" in r.lower() 
+                           and "breach" in r.lower() for r in decision_hold.reasons))
+        self.assertNotEqual(decision_hold.decision, "BLOCK")
+        
+        # Further sleeve ADD should BLOCK (can't add more to sleeve until balanced)
+        decision_add = check_book_constraints(
+            ticker="NEWSLV",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=100,
+            theme="Speculative",
+            liquidity_adv=50000000,
+            option_sleeve=True,
+            correlation_data={"SYM": 0.1, "TSLA": 0.3, "WRD": 0.3},
+        )
+        
+        self.assertEqual(decision_add.decision, "BLOCK")
+        self.assertTrue(any("sleeve" in r.lower() and "core" in r.lower() 
+                           for r in decision_add.reasons))
+    
+    def test_add_core_restores_balance_allows(self):
+        """
+        Adding core that restores sleeve ≤ core should ALLOW (other constraints equal).
+        
+        Breach state: sleeve $600 > core $298.90
+        Add $300 core (10% NAV) → core becomes $598.90, nearly equal to sleeve $600 → restores balance
+        """
+        positions = [
+            Position("SYM", weight_pct=9.96, notional=298.90, theme="Core",
+                    liquidity_adv=100000000),  # Core
+            Position("TSLA", weight_pct=10.0, notional=300, theme="EV",
+                    liquidity_adv=150000000, option_sleeve=True),  # Sleeve
+            Position("WRD", weight_pct=10.0, notional=300, theme="Speculative",
+                    liquidity_adv=80000000, option_sleeve=True),  # Sleeve
+        ]
+        book = Book(nav=3000, cash=2101.10, positions=positions, asof="2026-08-16")
+        
+        # Currently in breach: sleeve $600 > core $298.90
+        self.assertGreater(book.sleeve_notional(), book.core_notional())
+        
+        # Add $300 core (10% NAV, at single name limit) → post-trade core $598.90 ≈ sleeve $600
+        decision = check_book_constraints(
+            ticker="NEWCORE",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=300,  # 10% NAV
+            theme="Industrial",  # Different theme
+            liquidity_adv=120000000,
+            option_sleeve=False,  # Core position
+            correlation_data={"SYM": 0.2, "TSLA": 0.1, "WRD": 0.1},
+        )
+        
+        # Should ALLOW or FLAG for existing breach (but not BLOCK the core add)
+        self.assertIn(decision.decision, ("ALLOW", "FLAG"))
+        self.assertNotEqual(decision.decision, "BLOCK")
+    
+    def test_sleeve_add_stays_balanced_allows(self):
+        """
+        Sleeve ADD that stays sleeve ≤ core and ≤ 20% NAV should ALLOW.
+        
+        Balanced book: core $600, sleeve $100 (10% NAV < 20% limit)
+        Add $50 sleeve (5% NAV) → sleeve becomes $150 (15% NAV), still < core $600 → OK
+        """
+        positions = [
+            Position("CORE1", weight_pct=30.0, notional=300, theme="Tech",
+                    liquidity_adv=500000000),  # Core
+            Position("CORE2", weight_pct=30.0, notional=300, theme="Energy",
+                    liquidity_adv=200000000),  # Core
+            Position("SLEEVE1", weight_pct=10.0, notional=100, theme="Speculative",
+                    liquidity_adv=50000000, option_sleeve=True),  # Sleeve
+        ]
+        book = Book(nav=1000, cash=300, positions=positions, asof="2026-08-16")
+        
+        # Verify balance: sleeve $100 (10% NAV), core $600 (60% NAV) → balanced
+        self.assertEqual(book.sleeve_notional(), 100)
+        self.assertEqual(book.core_notional(), 600)
+        self.assertLessEqual(book.sleeve_notional(), book.core_notional())
+        
+        # Add $50 sleeve (5% NAV) → sleeve becomes $150 (15% NAV < 20%), still < $600 core
+        decision = check_book_constraints(
+            ticker="SLEEVE2",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=50,
+            theme="Speculative",
+            liquidity_adv=40000000,
+            option_sleeve=True,
+            correlation_data={"CORE1": 0.2, "CORE2": 0.1, "SLEEVE1": 0.3},
+        )
+        
+        # Should ALLOW (stays balanced and under 20% NAV)
+        self.assertEqual(decision.decision, "ALLOW")
+    
+    def test_cio_hold_never_flattened(self):
+        """
+        CIO-approved HOLD should never be flattened to cure sleeve-core breach.
+        
+        Even with sleeve > core breach, CIO hold passes through (no flatten).
+        """
+        positions = [
+            Position("CORE", weight_pct=10.0, notional=300, theme="Core",
+                    liquidity_adv=100000000),  # Core
+            Position("SLEEVE1", weight_pct=15.0, notional=450, theme="Speculative",
+                    liquidity_adv=50000000, option_sleeve=True),  # Sleeve
+            Position("SLEEVE2", weight_pct=15.0, notional=450, theme="Speculative",
+                    liquidity_adv=40000000, hurdle_15pct="miss"),  # Sleeve
+        ]
+        book = Book(nav=3000, cash=1800, positions=positions, asof="2026-08-16")
+        
+        # Verify breach: sleeve $900 > core $300
+        self.assertEqual(book.sleeve_notional(), 900)
+        self.assertEqual(book.core_notional(), 300)
+        self.assertGreater(book.sleeve_notional(), book.core_notional())
+        
+        # CIO-approved HOLD on sleeve position → should FLAG but not flatten
+        decision = check_book_constraints(
+            ticker="SLEEVE1",
+            ticket_type="HOLD",
+            book=book,
+            cio_approved=True,
+        )
+        
+        # Should FLAG for breach but ALLOW the hold (not flatten)
+        self.assertEqual(decision.decision, "FLAG")
+        self.assertTrue(decision.cio_approved)
+        self.assertTrue(any("sleeve" in r.lower() and "core" in r.lower() for r in decision.reasons))
+        self.assertNotEqual(decision.decision, "BLOCK")
     
     def test_liquidity_constraint_enforced(self):
         """Test that position size vs ADV is enforced."""
