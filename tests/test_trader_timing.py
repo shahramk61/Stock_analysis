@@ -1,0 +1,479 @@
+"""Unit tests for trader timing tools."""
+import os
+import sys
+from datetime import datetime, time, date
+
+SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+from trader.session_clock import (  # noqa: E402
+    get_session_state,
+    is_market_open,
+    should_allow_new_trades,
+    SessionState,
+    US_EASTERN,
+)
+from trader.horizon import choose_horizon, Horizon  # noqa: E402
+from trader.levels import compute_levels, validate_tape_quality  # noqa: E402
+from trader.gate import gate_execution, normalize_action  # noqa: E402
+from trader.timing import build_timing_card  # noqa: E402
+
+
+# ============================================================================
+# Session clock tests
+# ============================================================================
+
+def test_weekend_closed():
+    """Weekend (Saturday/Sunday) → closed, no new trades."""
+    # Saturday Aug 16, 2026
+    sat = datetime(2026, 8, 16, 14, 0, tzinfo=US_EASTERN)
+    session = get_session_state(sat)
+    assert session.state == SessionState.CLOSED_WEEKEND
+    assert not session.is_open
+    assert not session.allows_new_trades
+    # Reason should mention day or closed
+    assert len(session.reason) > 0
+
+
+def test_regular_hours_open():
+    """Weekday during regular hours → open, allows trades."""
+    # Monday Aug 17, 2026, 10:30 AM ET (market open)
+    mon = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon)
+    assert session.state == SessionState.REGULAR_HOURS
+    assert session.is_open
+    assert session.allows_new_trades
+
+
+def test_premarket_no_new_trades():
+    """Pre-market hours → not open, no new trades."""
+    # Monday Aug 17, 2026, 8:00 AM ET
+    mon = datetime(2026, 8, 17, 8, 0, tzinfo=US_EASTERN)
+    session = get_session_state(mon)
+    assert session.state == SessionState.PRE_MARKET
+    assert not session.is_open
+    assert not session.allows_new_trades
+
+
+def test_after_hours_no_new_trades():
+    """After-hours → not open, no new trades."""
+    # Monday Aug 17, 2026, 5:00 PM ET
+    mon = datetime(2026, 8, 17, 17, 0, tzinfo=US_EASTERN)
+    session = get_session_state(mon)
+    assert session.state == SessionState.AFTER_HOURS
+    assert not session.is_open
+    assert not session.allows_new_trades
+
+
+def test_holiday_closed():
+    """Holiday (Christmas) → closed, no new trades."""
+    # Dec 25, 2026 (Christmas)
+    xmas = datetime(2026, 12, 25, 14, 0, tzinfo=US_EASTERN)
+    session = get_session_state(xmas)
+    assert session.state == SessionState.CLOSED_HOLIDAY
+    assert not session.is_open
+    assert not session.allows_new_trades
+
+
+def test_is_market_open_helpers():
+    """Quick helpers work correctly."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    sat_closed = datetime(2026, 8, 16, 14, 0, tzinfo=US_EASTERN)
+    
+    assert is_market_open(mon_open) is True
+    assert is_market_open(sat_closed) is False
+    
+    assert should_allow_new_trades(mon_open) is True
+    assert should_allow_new_trades(sat_closed) is False
+
+
+# ============================================================================
+# Horizon tests
+# ============================================================================
+
+def test_explicit_session_mode():
+    """Explicit session mode → session horizon."""
+    hc = choose_horizon(execution_mode="session", overall_score=55.0)
+    assert hc.horizon == Horizon.SESSION
+    assert hc.tighter_stop is True
+    assert hc.days == 1
+
+
+def test_explicit_swing_mode():
+    """Explicit swing mode → swing horizon."""
+    hc = choose_horizon(execution_mode="swing", overall_score=65.0)
+    assert hc.horizon == Horizon.SWING
+    assert hc.tighter_stop is False
+
+
+def test_high_volatility_weak_trend_session():
+    """High ATR + weak ADX + mid score → session."""
+    hc = choose_horizon(
+        overall_score=52.0,
+        atr_pct=5.0,  # High vol
+        adx=18.0,     # Weak trend
+    )
+    assert hc.horizon == Horizon.SESSION
+    assert hc.tighter_stop is True
+
+
+def test_strong_trend_swing():
+    """Strong trend (ADX >= 25) → swing."""
+    hc = choose_horizon(
+        overall_score=58.0,
+        atr_pct=2.5,
+        adx=28.0,  # Strong trend
+    )
+    assert hc.horizon == Horizon.SWING
+    assert hc.tighter_stop is False
+
+
+def test_high_score_swing():
+    """High score (>=60) → swing."""
+    hc = choose_horizon(
+        overall_score=65.0,
+        atr_pct=2.0,
+        adx=18.0,
+    )
+    assert hc.horizon == Horizon.SWING
+
+
+# ============================================================================
+# Levels tests
+# ============================================================================
+
+def test_missing_price_tape_invalid():
+    """Missing current_price → tape_invalid, all levels None."""
+    levels = compute_levels(current_price=None)
+    assert levels.tape_valid is False
+    assert levels.entry_price is None
+    assert levels.stop_price is None
+    assert "no tape" in levels.reason.lower()
+
+
+def test_levels_from_policy_stop():
+    """Valid price + policy stop → uses policy stop."""
+    levels = compute_levels(
+        current_price=100.0,
+        policy_stop=92.0,
+        atr_pct=3.0,
+    )
+    assert levels.tape_valid is True
+    assert levels.entry_price == 100.0
+    assert levels.stop_price == 92.0
+    assert "policy" in levels.reason.lower()
+
+
+def test_session_tighter_stop():
+    """Session mode → tighter stop."""
+    levels = compute_levels(
+        current_price=100.0,
+        atr_pct=2.0,
+        horizon_tighter_stop=True,
+    )
+    assert levels.tape_valid is True
+    assert levels.stop_price is not None
+    assert levels.stop_price < 100.0  # Stop below entry
+    assert "session" in levels.reason.lower()
+
+
+def test_atr_fallback_stop():
+    """No policy stop, use ATR fallback."""
+    levels = compute_levels(
+        current_price=100.0,
+        atr_pct=4.0,
+    )
+    assert levels.tape_valid is True
+    assert levels.stop_price is not None
+    assert levels.stop_price < 100.0
+    assert "atr" in levels.reason.lower()
+
+
+def test_validate_tape_quality():
+    """Tape quality validation."""
+    valid, reason = validate_tape_quality(current_price=100.0)
+    assert valid is True
+    
+    invalid, reason = validate_tape_quality(current_price=None)
+    assert invalid is False
+    assert "missing" in reason.lower() or "invalid" in reason.lower()
+    
+    stale, reason = validate_tape_quality(
+        current_price=100.0,
+        last_update_age_minutes=120,
+        max_stale_minutes=60,
+    )
+    assert stale is False
+    assert "stale" in reason.lower()
+
+
+# ============================================================================
+# Gate tests
+# ============================================================================
+
+def test_policy_hint_flat_stays_flat():
+    """Policy_hint flat → execute stays flat."""
+    gate = gate_execution(
+        policy_hint={"action": "flat", "conviction": "Medium"},
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert any("policy already flat" in r.lower() for r in gate.reasons)
+
+
+def test_research_buy_policy_flat_conflict():
+    """Research BUY + policy FLAT → still flat, policy_conflict."""
+    gate = gate_execution(
+        policy_hint={"action": "flat"},
+        dual_recommendation={
+            "research_recommendation": "BUY",
+            "execution_label": "FLAT",
+        },
+    )
+    assert gate.execute_action == "flat"
+    assert gate.policy_conflict is True
+
+
+def test_memory_block_new_long():
+    """Memory block_new_long → flat."""
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        decision_memory={"block_new_long": True, "flags": ["stop_cooldown(3d left)"]},
+        session=None,  # Will check now
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.memory_blocks is True
+    assert any("memory block" in r.lower() for r in gate.reasons)
+
+
+def test_session_closed_blocks():
+    """Session closed (weekend) → flat."""
+    sat = datetime(2026, 8, 16, 14, 0, tzinfo=US_EASTERN)
+    session = get_session_state(sat)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.session_blocks is True
+
+
+def test_missing_tape_blocks():
+    """Missing tape → flat."""
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        levels=compute_levels(current_price=None),  # No price
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.tape_blocks is True
+
+
+def test_all_gates_pass_allows_long():
+    """All gates pass → execute long."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "long"
+    assert gate.would_be_flat is False
+    assert not gate.memory_blocks
+    assert not gate.session_blocks
+    assert not gate.tape_blocks
+
+
+def test_normalize_action():
+    """Action normalization."""
+    assert normalize_action("buy") == "long"
+    assert normalize_action("long") == "long"
+    assert normalize_action("LONG") == "long"
+    assert normalize_action("hold") == "flat"
+    assert normalize_action("sell") == "flat"
+    assert normalize_action("flat") == "flat"
+    assert normalize_action("short") == "short"
+    assert normalize_action(None) == "flat"
+
+
+# ============================================================================
+# Timing card integration tests
+# ============================================================================
+
+def test_timing_card_weekend_not_a_trade():
+    """Weekend → not a trade."""
+    sat = datetime(2026, 8, 16, 14, 0, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        current_price=150.0,
+        timestamp=sat,
+    )
+    
+    assert card.now_a_trade is False
+    assert card.session_blocks is True
+    assert card.execute_action == "flat"
+    assert card.would_be_flat is True
+
+
+def test_timing_card_open_market_with_tape():
+    """Open market + valid tape + policy long → now a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long", "stop_price": 145.0},
+        current_price=150.0,
+        overall_score=62.0,
+        atr_pct=2.5,
+        adx=22.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is True
+    assert card.session_open is True
+    assert card.tape_valid is True
+    assert card.execute_action == "long"
+    assert card.would_be_flat is False
+    assert card.entry_price == 150.0
+    assert card.stop_price is not None
+
+
+def test_timing_card_policy_flat_not_a_trade():
+    """Open market but policy flat → not a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "flat"},
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is False
+    assert card.execute_action == "flat"
+    assert card.would_be_flat is True
+
+
+def test_timing_card_missing_price_not_a_trade():
+    """Open market but missing price → not a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        current_price=None,  # Missing!
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is False
+    assert not card.tape_valid
+    assert card.tape_blocks is True
+    assert card.execute_action == "flat"
+
+
+def test_timing_card_memory_block_not_a_trade():
+    """Open market but memory blocks → not a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        decision_memory={
+            "block_new_long": True,
+            "flags": ["stop_cooldown(2d left)"],
+        },
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is False
+    assert card.memory_blocks is True
+    assert card.execute_action == "flat"
+
+
+def test_timing_card_session_vs_swing():
+    """Horizon affects stop tightness."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    # Session mode
+    card_session = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        current_price=100.0,
+        atr_pct=2.0,
+        execution_mode="session",
+        timestamp=mon_open,
+    )
+    
+    # Swing mode
+    card_swing = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        current_price=100.0,
+        atr_pct=2.0,
+        execution_mode="swing",
+        timestamp=mon_open,
+    )
+    
+    assert card_session.horizon == "session"
+    assert card_swing.horizon == "swing"
+    
+    # Session should have tighter stop
+    if card_session.stop_price and card_swing.stop_price:
+        # Session stop should be closer to entry (tighter)
+        session_distance = 100.0 - card_session.stop_price
+        swing_distance = 100.0 - card_swing.stop_price
+        assert session_distance < swing_distance
+
+
+if __name__ == "__main__":
+    # Session clock
+    test_weekend_closed()
+    test_regular_hours_open()
+    test_premarket_no_new_trades()
+    test_after_hours_no_new_trades()
+    test_holiday_closed()
+    test_is_market_open_helpers()
+    
+    # Horizon
+    test_explicit_session_mode()
+    test_explicit_swing_mode()
+    test_high_volatility_weak_trend_session()
+    test_strong_trend_swing()
+    test_high_score_swing()
+    
+    # Levels
+    test_missing_price_tape_invalid()
+    test_levels_from_policy_stop()
+    test_session_tighter_stop()
+    test_atr_fallback_stop()
+    test_validate_tape_quality()
+    
+    # Gate
+    test_policy_hint_flat_stays_flat()
+    test_research_buy_policy_flat_conflict()
+    test_memory_block_new_long()
+    test_session_closed_blocks()
+    test_missing_tape_blocks()
+    test_all_gates_pass_allows_long()
+    test_normalize_action()
+    
+    # Timing card integration
+    test_timing_card_weekend_not_a_trade()
+    test_timing_card_open_market_with_tape()
+    test_timing_card_policy_flat_not_a_trade()
+    test_timing_card_missing_price_not_a_trade()
+    test_timing_card_memory_block_not_a_trade()
+    test_timing_card_session_vs_swing()
+    
+    print("All trader timing tests passed.")

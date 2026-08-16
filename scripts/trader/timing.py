@@ -1,0 +1,354 @@
+"""
+Timing card CLI and orchestrator.
+
+Combines session clock, horizon, levels, and gate to answer:
+- Is now actually a trade?
+- Session vs swing
+- Entry/stop/exit levels
+- Would Execute be flat after timing + tape + memory?
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .session_clock import get_session_state, MarketSession, SessionState
+from .horizon import choose_horizon, Horizon, HorizonChoice
+from .levels import compute_levels, TradeLevels
+from .gate import gate_execution, ExecuteGate
+
+
+@dataclass
+class TimingCard:
+    """
+    Timing card JSON output.
+    
+    Answers:
+    - now_a_trade: bool (session open + tape valid + gates pass)
+    - session_state: str
+    - horizon: "session" or "swing"
+    - entry/stop/exit: nullable prices
+    - execute_action: final action after gates
+    - would_be_flat: bool
+    - reasons: list of decision reasons
+    """
+    ticker: str
+    timestamp: str
+    now_a_trade: bool
+    session_state: str
+    session_open: bool
+    horizon: str
+    horizon_days: Optional[int]
+    entry_price: Optional[float]
+    stop_price: Optional[float]
+    exit_price: Optional[float]
+    current_price: Optional[float]
+    tape_valid: bool
+    execute_action: str
+    would_be_flat: bool
+    reasons: List[str]
+    
+    # Component details
+    policy_hint_action: Optional[str] = None
+    research_label: Optional[str] = None
+    dual_execute_label: Optional[str] = None
+    memory_blocks: bool = False
+    session_blocks: bool = False
+    tape_blocks: bool = False
+    policy_conflict: bool = False
+    overall_score: Optional[float] = None
+
+
+def build_timing_card(
+    ticker: str,
+    *,
+    policy_hint: Optional[Dict[str, Any]] = None,
+    dual_recommendation: Optional[Dict[str, Any]] = None,
+    decision_memory: Optional[Dict[str, Any]] = None,
+    current_price: Optional[float] = None,
+    overall_score: float = 50.0,
+    atr_pct: float = 0.0,
+    adx: float = 0.0,
+    signals: Optional[Dict[str, Any]] = None,
+    execution_mode: Optional[str] = None,
+    mc_risk: Optional[Dict[str, Any]] = None,
+    timestamp: Optional[datetime] = None,
+) -> TimingCard:
+    """
+    Build timing card from facts.
+    
+    Args:
+        ticker: Ticker symbol
+        policy_hint: Policy hint dict (action, conviction, stop_price, etc.)
+        dual_recommendation: Dual research/execute labels
+        decision_memory: Memory dict (from memory.apply_to_policy_inputs)
+        current_price: Current market price
+        overall_score: Overall score
+        atr_pct: ATR percentage
+        adx: ADX value
+        signals: Full signals dict
+        execution_mode: Explicit "session" or "swing"
+        mc_risk: Monte Carlo risk dict
+        timestamp: Timestamp for session check (defaults to now)
+    
+    Returns:
+        TimingCard with all timing/gate decisions
+    """
+    if timestamp is None:
+        timestamp = datetime.now()
+    
+    # 1. Session clock
+    session = get_session_state(timestamp)
+    
+    # 2. Horizon
+    horizon_choice = choose_horizon(
+        execution_mode=execution_mode,
+        overall_score=overall_score,
+        atr_pct=atr_pct,
+        adx=adx,
+        signals=signals,
+    )
+    
+    # 3. Levels
+    mc_risk_stop = None
+    if mc_risk and isinstance(mc_risk, dict):
+        mc_risk_stop = mc_risk.get("stop_price")
+    
+    policy_stop = None
+    policy_target = None
+    if policy_hint and isinstance(policy_hint, dict):
+        policy_stop = policy_hint.get("stop_price")
+        policy_target = policy_hint.get("target_price")
+    
+    levels = compute_levels(
+        current_price=current_price,
+        policy_stop=policy_stop,
+        policy_target=policy_target,
+        atr_pct=atr_pct,
+        mc_risk_stop=mc_risk_stop,
+        horizon_tighter_stop=horizon_choice.tighter_stop,
+    )
+    
+    # 4. Execute gate
+    gate = gate_execution(
+        policy_hint=policy_hint,
+        dual_recommendation=dual_recommendation,
+        decision_memory=decision_memory,
+        session=session,
+        levels=levels,
+        overall_score=overall_score,
+    )
+    
+    # 5. Now a trade? (all must pass)
+    now_a_trade = (
+        session.allows_new_trades
+        and levels.tape_valid
+        and not gate.would_be_flat
+    )
+    
+    # Collect all reasons
+    reasons = []
+    reasons.append(f"Session: {session.reason}")
+    reasons.append(f"Horizon: {horizon_choice.reason}")
+    if levels.tape_valid:
+        reasons.append(f"Levels: {levels.reason}")
+    else:
+        reasons.append(f"Tape: {levels.reason}")
+    reasons.extend(gate.reasons)
+    
+    if now_a_trade:
+        reasons.append("✓ NOW A TRADE: session open, tape valid, gates pass")
+    else:
+        blockers = []
+        if not session.allows_new_trades:
+            blockers.append("session closed")
+        if not levels.tape_valid:
+            blockers.append("tape invalid")
+        if gate.would_be_flat:
+            blockers.append("gates block")
+        reasons.append(f"✗ NOT A TRADE: {', '.join(blockers)}")
+    
+    return TimingCard(
+        ticker=ticker.upper(),
+        timestamp=timestamp.isoformat(),
+        now_a_trade=now_a_trade,
+        session_state=session.state.value,
+        session_open=session.is_open,
+        horizon=horizon_choice.horizon.value,
+        horizon_days=horizon_choice.days,
+        entry_price=levels.entry_price,
+        stop_price=levels.stop_price,
+        exit_price=levels.exit_price,
+        current_price=levels.current_price,
+        tape_valid=levels.tape_valid,
+        execute_action=gate.execute_action,
+        would_be_flat=gate.would_be_flat,
+        reasons=reasons,
+        policy_hint_action=gate.policy_hint_action,
+        research_label=gate.research_label,
+        dual_execute_label=gate.dual_execute_label,
+        memory_blocks=gate.memory_blocks,
+        session_blocks=gate.session_blocks,
+        tape_blocks=gate.tape_blocks,
+        policy_conflict=gate.policy_conflict,
+        overall_score=overall_score,
+    )
+
+
+def load_handoff_json(path: Path) -> Dict[str, Any]:
+    """Load handoff JSON from prepare_decision_handoff.py output."""
+    with open(path) as f:
+        return json.load(f)
+
+
+def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract timing-relevant facts from handoff JSON."""
+    signals = handoff.get("signals") or {}
+    if isinstance(signals, dict):
+        signals_obj = signals
+    else:
+        signals_obj = {}
+    
+    signals_inner = signals_obj.get("signals") or {}
+    
+    mc_risk = signals_inner.get("mc_risk") or {}
+    atr_vol = signals_inner.get("atr_vol") or {}
+    adx_sig = signals_inner.get("adx") or {}
+    
+    policy_hint = handoff.get("policy_hint") or {}
+    dual_rec = handoff.get("dual_recommendation") or {}
+    
+    # Memory not in handoff by default (passed as empty string)
+    # Could be added from journal
+    decision_memory = None
+    mem_text = handoff.get("decision_memory") or ""
+    if mem_text and mem_text != "":
+        # If memory text is present, assume block_new_long if it mentions cooldown
+        decision_memory = {
+            "block_new_long": "cooldown" in mem_text.lower() or "block" in mem_text.lower(),
+            "flags": ["parsed from memory_text"],
+            "risk_multiplier": 1.0,
+        }
+    
+    return {
+        "ticker": handoff.get("ticker") or "UNKNOWN",
+        "policy_hint": policy_hint,
+        "dual_recommendation": dual_rec,
+        "decision_memory": decision_memory,
+        "current_price": handoff.get("current_price"),
+        "overall_score": signals_obj.get("overall_score") or 50.0,
+        "atr_pct": atr_vol.get("atr_percent") or 0.0,
+        "adx": adx_sig.get("adx") or 0.0,
+        "signals": signals_inner,
+        "mc_risk": mc_risk,
+    }
+
+
+def main():
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Trader timing CLI - answers if now is actually a trade"
+    )
+    parser.add_argument("ticker", help="Ticker symbol")
+    parser.add_argument(
+        "--handoff",
+        help="Path to handoff JSON from prepare_decision_handoff.py",
+    )
+    parser.add_argument(
+        "--current-price",
+        type=float,
+        help="Current price (required if not using --handoff)",
+    )
+    parser.add_argument(
+        "--score",
+        type=float,
+        default=50.0,
+        help="Overall score (default 50.0)",
+    )
+    parser.add_argument(
+        "--atr-pct",
+        type=float,
+        default=0.0,
+        help="ATR percentage (default 0.0)",
+    )
+    parser.add_argument(
+        "--adx",
+        type=float,
+        default=0.0,
+        help="ADX value (default 0.0)",
+    )
+    parser.add_argument(
+        "--execution-mode",
+        choices=["session", "swing"],
+        help="Force session or swing mode",
+    )
+    parser.add_argument(
+        "--policy-action",
+        help="Policy hint action (long/flat/short)",
+    )
+    parser.add_argument(
+        "--output",
+        help="Output JSON file path (prints to stdout if not specified)",
+    )
+    
+    args = parser.parse_args()
+    
+    # Load facts from handoff or CLI args
+    if args.handoff:
+        handoff_path = Path(args.handoff)
+        if not handoff_path.exists():
+            print(f"Error: handoff file not found: {handoff_path}", file=sys.stderr)
+            return 1
+        
+        handoff = load_handoff_json(handoff_path)
+        facts = extract_facts_from_handoff(handoff)
+        
+        # CLI args can override handoff
+        if args.current_price is not None:
+            facts["current_price"] = args.current_price
+        if args.execution_mode:
+            facts["execution_mode"] = args.execution_mode
+    else:
+        # Build from CLI args
+        if args.current_price is None:
+            print("Error: --current-price required when not using --handoff", file=sys.stderr)
+            return 1
+        
+        facts = {
+            "ticker": args.ticker,
+            "policy_hint": {"action": args.policy_action} if args.policy_action else None,
+            "dual_recommendation": None,
+            "decision_memory": None,
+            "current_price": args.current_price,
+            "overall_score": args.score,
+            "atr_pct": args.atr_pct,
+            "adx": args.adx,
+            "signals": None,
+            "mc_risk": None,
+            "execution_mode": args.execution_mode,
+        }
+    
+    # Build timing card
+    card = build_timing_card(**facts)
+    
+    # Output
+    output = json.dumps(asdict(card), indent=2, default=str)
+    
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(output)
+        print(f"Timing card written: {args.output}")
+    else:
+        print(output)
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
