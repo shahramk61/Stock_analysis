@@ -178,10 +178,24 @@ def compute_pit_score(
         availability["cmf"] = "unavailable"
 
     try:
-        signals["mc_risk"] = get_monte_carlo_risk(ticker, **kw)
-        availability["mc_risk"] = "computed"
+        mc_result = get_monte_carlo_risk(ticker, **kw)
+        # Detect if mc_risk returned placeholder values (insufficient hist or sim failure)
+        # Placeholders: var_95=20.0, cvar_95=28.0 (hardcoded in stock_signals.py lines 688, 718)
+        is_placeholder = (
+            mc_result.get("var_95") == 20.0
+            and mc_result.get("cvar_95") == 28.0
+            and mc_result.get("simulated_annual_vol") in (32.0, 35.0)
+        )
+        if is_placeholder:
+            # Do not emit placeholder values as real measurements
+            signals["mc_risk"] = {}
+            availability["mc_risk"] = "unavailable (insufficient hist for MC simulation)"
+        else:
+            # Real computed values from asof-sliced returns
+            signals["mc_risk"] = mc_result
+            availability["mc_risk"] = "computed"
     except Exception:
-        signals["mc_risk"] = {"var_95": 20.0}
+        signals["mc_risk"] = {}
         availability["mc_risk"] = "unavailable"
 
     try:
@@ -316,14 +330,17 @@ def compute_pit_score(
     esg_quality = 70.0
 
     # Risk pillar: computed from monte carlo + vol signals
+    # Only use var_95 if it was actually computed (not a placeholder)
     risk_score = 70.0
-    var95 = float(signals["mc_risk"].get("var_95") or 20)
-    if var95 > 30:
-        risk_score -= 20
-    elif var95 > 20:
-        risk_score -= 10
-    elif var95 < 12:
-        risk_score += 5
+    if availability["mc_risk"] == "computed" and "var_95" in signals["mc_risk"]:
+        var95 = float(signals["mc_risk"]["var_95"])
+        if var95 > 30:
+            risk_score -= 20
+        elif var95 > 20:
+            risk_score -= 10
+        elif var95 < 12:
+            risk_score += 5
+    # Vol and regime adjustments (independent of MC)
     if signals["garch"].get("vol_ratio", 1) > 1.4:
         risk_score -= 8
     if signals["atr_vol"].get("vol_clustering") == "High":

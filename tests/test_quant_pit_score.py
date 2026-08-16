@@ -170,5 +170,84 @@ def test_pit_score_no_hist_provided():
     assert "No history provided" in result["error"]
 
 
+def test_pit_score_cvar_95_computed_from_asof_sliced_data():
+    """CVaR should be computed from asof-sliced data, not a placeholder."""
+    # Sufficient history for MC simulation
+    hist = _synthetic_hist(260)
+    asof = hist.index[180]
+
+    result = compute_pit_score(ticker="TEST", asof=asof, hist=hist.loc[:asof])
+
+    # Check that mc_risk was computed (not unavailable)
+    assert result["availability"]["mc_risk"] == "computed"
+
+    # Check that var_95 and cvar_95 are present
+    mc_risk = result["signals"]["mc_risk"]
+    assert "var_95" in mc_risk
+    assert "cvar_95" in mc_risk
+
+    # Values should be finite numbers (not placeholders)
+    var95 = mc_risk["var_95"]
+    cvar95 = mc_risk["cvar_95"]
+    assert isinstance(var95, (int, float))
+    assert isinstance(cvar95, (int, float))
+    assert var95 > 0
+    assert cvar95 > 0
+
+    # CVaR should be >= VaR (by definition)
+    assert cvar95 >= var95
+
+    # Placeholders are 20.0 and 28.0 — real values should differ
+    # (With 260 bars of synthetic data, we should get actual computed values)
+    assert not (var95 == 20.0 and cvar95 == 28.0), "Should not return placeholder values"
+
+
+def test_pit_score_cvar_95_invariant_to_future_mutation():
+    """CVaR computed at asof-T should not change if future bars are mutated."""
+    hist = _synthetic_hist(260)
+    asof_idx = 180
+    asof_date = hist.index[asof_idx]
+    future_idx = 200
+
+    # Compute with original hist
+    hist_asof1 = hist.loc[:asof_date].copy()
+    result1 = compute_pit_score(ticker="TEST", asof=asof_date, hist=hist_asof1)
+
+    # Mutate a future bar
+    hist_mutated = hist.copy()
+    hist_mutated.loc[hist_mutated.index[future_idx], "Close"] *= 2.0
+
+    # Compute again with mutated hist (sliced to same asof)
+    hist_asof2 = hist_mutated.loc[:asof_date].copy()
+    result2 = compute_pit_score(ticker="TEST", asof=asof_date, hist=hist_asof2)
+
+    # CVaR values must be identical
+    if result1["availability"]["mc_risk"] == "computed":
+        cvar1 = result1["signals"]["mc_risk"].get("cvar_95")
+        cvar2 = result2["signals"]["mc_risk"].get("cvar_95")
+        assert cvar1 == cvar2, f"CVaR changed after future mutation: {cvar1} != {cvar2}"
+
+
+def test_pit_score_cvar_95_unavailable_with_short_hist():
+    """CVaR should be marked unavailable (not 28.0 placeholder) with insufficient history."""
+    # Very short history (not enough for MC simulation)
+    hist = _synthetic_hist(50)  # Less than 100 bars required by get_monte_carlo_risk
+    asof = hist.index[-1]
+
+    result = compute_pit_score(ticker="TEST", asof=asof, hist=hist)
+
+    # Check that mc_risk is unavailable (not computed)
+    assert "unavailable" in result["availability"]["mc_risk"]
+
+    # Check that signals do not contain placeholder values
+    mc_risk = result["signals"]["mc_risk"]
+    # Should be empty or not contain placeholders
+    if "cvar_95" in mc_risk:
+        # If present, must not be the placeholder
+        assert mc_risk["cvar_95"] != 28.0, "Should not emit placeholder as real measurement"
+    # Prefer: field should not be present at all when unavailable
+    assert mc_risk.get("cvar_95") is None or "unavailable" in result["availability"]["mc_risk"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
