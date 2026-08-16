@@ -1,6 +1,12 @@
 """
-Execute gate: combine policy_hint, dual_recommendation, decision memory, 
+Execute gate: combine risk_veto, policy_hint, dual_recommendation, decision memory, 
 session clock, and tape quality.
+
+Risk veto hierarchy (fail closed):
+1. Missing/invalid risk_veto → flat (fail closed for NEW risk)
+2. VETO → flat, risk = 0
+3. CUT → keep long only if policy says long; use risk_veto.risk_pct (if null → flat)
+4. ALLOW → still apply clock/tape/policy/memory gates
 
 Research BUY must never become a long when Execute is FLAT.
 Memory block_new_long wins. Closed market / missing tape → flat.
@@ -18,20 +24,24 @@ from .levels import TradeLevels
 @dataclass
 class ExecuteGate:
     """
-    Execute gating decision combining all timing/tape/memory factors.
+    Execute gating decision combining all timing/tape/memory/risk factors.
     
     would_be_flat: True if any gate blocks execution
     execute_action: final action after all gates applied
+    final_risk_pct: final risk percentage after all gates (may be from risk_veto)
     reasons: list of reasons for the decision
     """
     would_be_flat: bool
     execute_action: str  # "long", "flat", "short"
+    final_risk_pct: Optional[float]  # Final risk % (from risk_veto if CUT)
     reasons: List[str]
     
     # Component states
     policy_hint_action: Optional[str] = None
     dual_execute_label: Optional[str] = None
     research_label: Optional[str] = None
+    risk_veto_decision: Optional[str] = None  # ALLOW | CUT | VETO
+    risk_veto_blocks: bool = False
     memory_blocks: bool = False
     session_blocks: bool = False
     tape_blocks: bool = False
@@ -53,17 +63,25 @@ def gate_execution(
     policy_hint: Optional[Dict[str, Any]] = None,
     dual_recommendation: Optional[Dict[str, Any]] = None,
     decision_memory: Optional[Dict[str, Any]] = None,
+    risk_veto: Optional[Dict[str, Any]] = None,
     session: Optional[MarketSession] = None,
     levels: Optional[TradeLevels] = None,
     overall_score: float = 50.0,
 ) -> ExecuteGate:
     """
-    Gate execution based on policy, memory, session clock, and tape.
+    Gate execution based on risk_veto, policy, memory, session clock, and tape.
+    
+    Risk veto hierarchy (fail closed):
+    1. Missing/invalid risk_veto → flat (fail closed for NEW risk)
+    2. VETO → flat, risk = 0
+    3. CUT → keep long only if policy says long; use risk_veto.risk_pct (if null → flat)
+    4. ALLOW → still apply clock/tape/policy/memory gates
     
     Args:
         policy_hint: Policy hint dict with action, conviction, rationale
         dual_recommendation: Dual research/execute labels
         decision_memory: Memory dict (from memory.apply_to_policy_inputs)
+        risk_veto: Risk veto object (decision, reason, missing, risk_pct)
         session: Market session status
         levels: Trade levels with tape validity
     
@@ -72,10 +90,12 @@ def gate_execution(
     """
     reasons: List[str] = []
     
-    # Extract policy_hint action
+    # Extract policy_hint action and risk
     policy_action = None
+    policy_risk_pct = None
     if policy_hint and isinstance(policy_hint, dict):
         policy_action = normalize_action(policy_hint.get("action"))
+        policy_risk_pct = policy_hint.get("suggested_risk_pct")
     
     # Extract dual recommendation labels
     research_label = None
@@ -95,16 +115,130 @@ def gate_execution(
         proposed_action = "flat"
         reasons.append("no policy_hint or dual Execute - default flat")
     
+    # ========================================================================
+    # GATE 0: Risk veto (FIRST GATE - fail closed)
+    # ========================================================================
+    risk_veto_decision = None
+    risk_veto_blocks = False
+    final_risk_pct = policy_risk_pct  # Default to policy risk
+    
+    if not _is_valid_risk_veto(risk_veto):
+        # Missing or invalid risk_veto → fail closed (flat for NEW risk)
+        risk_veto_blocks = True
+        reasons.append("risk_veto: missing or invalid - fail closed (flat for NEW risk)")
+        return ExecuteGate(
+            would_be_flat=True,
+            execute_action="flat",
+            final_risk_pct=0.0,
+            reasons=reasons,
+            policy_hint_action=policy_action,
+            dual_execute_label=dual_execute_label,
+            research_label=research_label,
+            risk_veto_decision=None,
+            risk_veto_blocks=True,
+            memory_blocks=False,
+            session_blocks=False,
+            tape_blocks=False,
+            policy_conflict=_is_policy_conflict(research_label, "flat"),
+        )
+    
+    risk_veto_decision = str(risk_veto.get("decision", "")).upper()
+    risk_veto_reason = risk_veto.get("reason", "")
+    risk_veto_risk_pct = risk_veto.get("risk_pct")
+    
+    reasons.append(f"risk_veto: {risk_veto_decision}")
+    
+    # Branch on risk_veto.decision
+    if risk_veto_decision == "VETO":
+        # VETO → stay flat, risk = 0
+        risk_veto_blocks = True
+        reasons.append(f"risk_veto VETO: {risk_veto_reason}")
+        return ExecuteGate(
+            would_be_flat=True,
+            execute_action="flat",
+            final_risk_pct=0.0,
+            reasons=reasons,
+            policy_hint_action=policy_action,
+            dual_execute_label=dual_execute_label,
+            research_label=research_label,
+            risk_veto_decision=risk_veto_decision,
+            risk_veto_blocks=True,
+            memory_blocks=False,
+            session_blocks=False,
+            tape_blocks=False,
+            policy_conflict=_is_policy_conflict(research_label, "flat"),
+        )
+    
+    elif risk_veto_decision == "CUT":
+        # CUT → keep long only if policy says long; use risk_veto.risk_pct
+        if risk_veto_risk_pct is None or not _is_finite(risk_veto_risk_pct):
+            # CUT with null/invalid risk_pct → fail closed (flat)
+            risk_veto_blocks = True
+            reasons.append(f"risk_veto CUT with null/invalid risk_pct: {risk_veto_reason} - flat")
+            return ExecuteGate(
+                would_be_flat=True,
+                execute_action="flat",
+                final_risk_pct=0.0,
+                reasons=reasons,
+                policy_hint_action=policy_action,
+                dual_execute_label=dual_execute_label,
+                research_label=research_label,
+                risk_veto_decision=risk_veto_decision,
+                risk_veto_blocks=True,
+                memory_blocks=False,
+                session_blocks=False,
+                tape_blocks=False,
+                policy_conflict=_is_policy_conflict(research_label, "flat"),
+            )
+        
+        # CUT with valid risk_pct: override policy risk, but still need policy to be constructive
+        final_risk_pct = float(risk_veto_risk_pct)
+        reasons.append(f"risk_veto CUT: {risk_veto_reason} - risk_pct={final_risk_pct}")
+        # Continue to other gates (will check if policy is constructive)
+    
+    elif risk_veto_decision == "ALLOW":
+        # ALLOW → still apply all other gates
+        reasons.append(f"risk_veto ALLOW: {risk_veto_reason} - proceed to other gates")
+        # Continue to other gates
+    
+    else:
+        # Unknown decision → fail closed
+        risk_veto_blocks = True
+        reasons.append(f"risk_veto unknown decision '{risk_veto_decision}' - fail closed")
+        return ExecuteGate(
+            would_be_flat=True,
+            execute_action="flat",
+            final_risk_pct=0.0,
+            reasons=reasons,
+            policy_hint_action=policy_action,
+            dual_execute_label=dual_execute_label,
+            research_label=research_label,
+            risk_veto_decision=risk_veto_decision,
+            risk_veto_blocks=True,
+            memory_blocks=False,
+            session_blocks=False,
+            tape_blocks=False,
+            policy_conflict=_is_policy_conflict(research_label, "flat"),
+        )
+    
+    # ========================================================================
+    # From here: risk_veto is ALLOW or CUT (with valid risk_pct)
+    # Apply remaining gates
+    # ========================================================================
+    
     # Gate 1: Policy already flat
     if proposed_action == "flat":
         reasons.append("Policy already flat - no execution")
         return ExecuteGate(
             would_be_flat=True,
             execute_action="flat",
+            final_risk_pct=0.0,
             reasons=reasons,
             policy_hint_action=policy_action,
             dual_execute_label=dual_execute_label,
             research_label=research_label,
+            risk_veto_decision=risk_veto_decision,
+            risk_veto_blocks=False,
             memory_blocks=False,
             session_blocks=False,
             tape_blocks=False,
@@ -158,6 +292,7 @@ def gate_execution(
     if blocks:
         final_action = "flat"
         would_be_flat = True
+        final_risk_pct = 0.0
         reasons.append(f"Execute gated to FLAT: {len(blocks)} blocker(s)")
     else:
         final_action = proposed_action
@@ -171,15 +306,43 @@ def gate_execution(
     return ExecuteGate(
         would_be_flat=would_be_flat,
         execute_action=final_action,
+        final_risk_pct=final_risk_pct if not would_be_flat else 0.0,
         reasons=reasons,
         policy_hint_action=policy_action,
         dual_execute_label=dual_execute_label,
         research_label=research_label,
+        risk_veto_decision=risk_veto_decision,
+        risk_veto_blocks=risk_veto_blocks,
         memory_blocks=memory_blocks,
         session_blocks=session_blocks,
         tape_blocks=tape_blocks,
         policy_conflict=policy_conflict,
     )
+
+
+def _is_valid_risk_veto(risk_veto: Optional[Dict[str, Any]]) -> bool:
+    """
+    Check if risk_veto is valid (non-missing, has decision field).
+    
+    Returns False if:
+    - risk_veto is None or not a dict
+    - decision field is missing or not a valid string
+    """
+    if not risk_veto or not isinstance(risk_veto, dict):
+        return False
+    decision = risk_veto.get("decision")
+    if not decision or not isinstance(decision, str):
+        return False
+    return str(decision).upper() in ("ALLOW", "CUT", "VETO")
+
+
+def _is_finite(val: Any) -> bool:
+    """Check if value is a finite number."""
+    try:
+        f = float(val)
+        return not (f != f or f == float('inf') or f == float('-inf'))  # NaN or inf check
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_policy_conflict(research_label: Optional[str], execute_action: str) -> bool:

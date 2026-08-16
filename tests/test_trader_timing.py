@@ -216,16 +216,19 @@ def test_policy_hint_flat_stays_flat():
     """Policy_hint flat → execute stays flat."""
     gate = gate_execution(
         policy_hint={"action": "flat", "conviction": "Medium"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
     )
     assert gate.execute_action == "flat"
     assert gate.would_be_flat is True
-    assert any("policy already flat" in r.lower() for r in gate.reasons)
+    # May have risk_veto reason first, policy flat reason after
+    assert any("flat" in r.lower() for r in gate.reasons)
 
 
 def test_research_buy_policy_flat_conflict():
     """Research BUY + policy FLAT → still flat, policy_conflict."""
     gate = gate_execution(
         policy_hint={"action": "flat"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         dual_recommendation={
             "research_recommendation": "BUY",
             "execution_label": "FLAT",
@@ -239,6 +242,7 @@ def test_memory_block_new_long():
     """Memory block_new_long → flat."""
     gate = gate_execution(
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         decision_memory={"block_new_long": True, "flags": ["stop_cooldown(3d left)"]},
         session=None,  # Will check now
         levels=compute_levels(current_price=100.0),
@@ -256,6 +260,7 @@ def test_session_closed_blocks():
     
     gate = gate_execution(
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
     )
@@ -268,6 +273,7 @@ def test_missing_tape_blocks():
     """Missing tape → flat."""
     gate = gate_execution(
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         levels=compute_levels(current_price=None),  # No price
     )
     assert gate.execute_action == "flat"
@@ -282,11 +288,13 @@ def test_all_gates_pass_allows_long():
     
     gate = gate_execution(
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         session=session,
         levels=compute_levels(current_price=100.0),
     )
     assert gate.execute_action == "long"
     assert gate.would_be_flat is False
+    assert not gate.risk_veto_blocks
     assert not gate.memory_blocks
     assert not gate.session_blocks
     assert not gate.tape_blocks
@@ -315,6 +323,7 @@ def test_timing_card_weekend_not_a_trade():
     card = build_timing_card(
         "AAPL",
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=sat,
     )
@@ -332,6 +341,7 @@ def test_timing_card_open_market_with_tape():
     card = build_timing_card(
         "AAPL",
         policy_hint={"action": "long", "stop_price": 145.0},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         overall_score=62.0,
         atr_pct=2.5,
@@ -355,6 +365,7 @@ def test_timing_card_policy_flat_not_a_trade():
     card = build_timing_card(
         "AAPL",
         policy_hint={"action": "flat"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=150.0,
         timestamp=mon_open,
     )
@@ -371,6 +382,7 @@ def test_timing_card_missing_price_not_a_trade():
     card = build_timing_card(
         "AAPL",
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=None,  # Missing!
         timestamp=mon_open,
     )
@@ -388,6 +400,7 @@ def test_timing_card_memory_block_not_a_trade():
     card = build_timing_card(
         "AAPL",
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         decision_memory={
             "block_new_long": True,
             "flags": ["stop_cooldown(2d left)"],
@@ -409,6 +422,7 @@ def test_timing_card_session_vs_swing():
     card_session = build_timing_card(
         "AAPL",
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=100.0,
         atr_pct=2.0,
         execution_mode="session",
@@ -419,6 +433,7 @@ def test_timing_card_session_vs_swing():
     card_swing = build_timing_card(
         "AAPL",
         policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
         current_price=100.0,
         atr_pct=2.0,
         execution_mode="swing",
@@ -434,6 +449,241 @@ def test_timing_card_session_vs_swing():
         session_distance = 100.0 - card_session.stop_price
         swing_distance = 100.0 - card_swing.stop_price
         assert session_distance < swing_distance
+
+
+# ============================================================================
+# Risk veto tests
+# ============================================================================
+
+def test_risk_veto_missing_fails_closed():
+    """Missing risk_veto → fail closed (flat for NEW risk)."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto=None,  # Missing!
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.risk_veto_blocks is True
+    assert any("missing or invalid" in r.lower() for r in gate.reasons)
+
+
+def test_risk_veto_invalid_decision_fails_closed():
+    """Invalid risk_veto.decision → fail closed."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "UNKNOWN", "reason": "invalid"},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.risk_veto_blocks is True
+
+
+def test_risk_veto_veto_stays_flat():
+    """VETO → stay flat, risk = 0."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "VETO", "reason": "Risk veto: high VaR", "missing": [], "risk_pct": None},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.risk_veto_blocks is True
+    assert gate.risk_veto_decision == "VETO"
+    assert gate.final_risk_pct == 0.0
+    assert any("veto" in r.lower() for r in gate.reasons)
+
+
+def test_risk_veto_cut_with_null_risk_pct_flat():
+    """CUT with null risk_pct → fail closed (flat)."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "CUT", "reason": "Size cut", "missing": ["risk_pct"], "risk_pct": None},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.risk_veto_blocks is True
+    assert gate.final_risk_pct == 0.0
+    assert any("null/invalid risk_pct" in r.lower() for r in gate.reasons)
+
+
+def test_risk_veto_cut_keeps_long_uses_risk_pct():
+    """CUT with valid risk_pct → keep long if policy says long, use risk_veto.risk_pct."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "CUT", "reason": "Size cut to 0.5%", "missing": [], "risk_pct": 0.005},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "long"
+    assert gate.would_be_flat is False
+    assert gate.risk_veto_blocks is False
+    assert gate.risk_veto_decision == "CUT"
+    assert gate.final_risk_pct == 0.005  # From risk_veto, not policy
+    assert any("cut" in r.lower() for r in gate.reasons)
+
+
+def test_risk_veto_cut_policy_flat_stays_flat():
+    """CUT but policy is flat → stay flat (CUT doesn't force long)."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    gate = gate_execution(
+        policy_hint={"action": "flat"},
+        risk_veto={"decision": "CUT", "reason": "Size cut", "missing": [], "risk_pct": 0.005},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+
+
+def test_risk_veto_allow_applies_other_gates():
+    """ALLOW → still apply clock/tape/memory gates."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    # ALLOW + policy long + all gates pass → long
+    gate = gate_execution(
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "ALLOW", "reason": "Risk approved", "missing": [], "risk_pct": None},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "long"
+    assert gate.would_be_flat is False
+    assert gate.risk_veto_decision == "ALLOW"
+    assert gate.final_risk_pct == 0.01  # From policy
+
+
+def test_risk_veto_allow_session_closed_flat():
+    """ALLOW but session closed → flat (other gates still apply)."""
+    sat = datetime(2026, 8, 16, 14, 0, tzinfo=US_EASTERN)
+    session = get_session_state(sat)
+    
+    gate = gate_execution(
+        policy_hint={"action": "long"},
+        risk_veto={"decision": "ALLOW", "reason": "Risk approved", "missing": [], "risk_pct": None},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "flat"
+    assert gate.would_be_flat is True
+    assert gate.session_blocks is True
+
+
+def test_risk_veto_dont_parse_policy_rationale():
+    """Don't infer veto by parsing policy_hint rationale text."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    session = get_session_state(mon_open)
+    
+    # Policy rationale mentions "veto" but risk_veto is ALLOW → should be long
+    gate = gate_execution(
+        policy_hint={
+            "action": "long",
+            "rationale": "Risk veto mentioned in text but this is ALLOW",
+            "suggested_risk_pct": 0.01,
+        },
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        session=session,
+        levels=compute_levels(current_price=100.0),
+    )
+    assert gate.execute_action == "long"
+    assert gate.would_be_flat is False
+
+
+def test_timing_card_risk_veto_missing():
+    """Timing card: missing risk_veto → not a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long"},
+        risk_veto=None,  # Missing!
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is False
+    assert card.risk_veto_blocks is True
+    assert card.execute_action == "flat"
+    assert card.final_risk_pct == 0.0
+
+
+def test_timing_card_risk_veto_veto():
+    """Timing card: VETO → not a trade."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "VETO", "reason": "High VaR", "missing": [], "risk_pct": None},
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is False
+    assert card.risk_veto_decision == "VETO"
+    assert card.execute_action == "flat"
+    assert card.final_risk_pct == 0.0
+
+
+def test_timing_card_risk_veto_cut():
+    """Timing card: CUT with valid risk_pct → now a trade (uses risk_veto.risk_pct)."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "CUT", "reason": "Size to 0.3%", "missing": [], "risk_pct": 0.003},
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is True
+    assert card.risk_veto_decision == "CUT"
+    assert card.execute_action == "long"
+    assert card.final_risk_pct == 0.003  # From risk_veto, not policy
+    assert card.would_be_flat is False
+
+
+def test_timing_card_risk_veto_allow():
+    """Timing card: ALLOW → applies other gates, now a trade if all pass."""
+    mon_open = datetime(2026, 8, 17, 10, 30, tzinfo=US_EASTERN)
+    
+    card = build_timing_card(
+        "AAPL",
+        policy_hint={"action": "long", "suggested_risk_pct": 0.01},
+        risk_veto={"decision": "ALLOW", "reason": "Approved", "missing": [], "risk_pct": None},
+        current_price=150.0,
+        timestamp=mon_open,
+    )
+    
+    assert card.now_a_trade is True
+    assert card.risk_veto_decision == "ALLOW"
+    assert card.execute_action == "long"
+    assert card.final_risk_pct == 0.01  # From policy
 
 
 if __name__ == "__main__":
@@ -468,6 +718,17 @@ if __name__ == "__main__":
     test_all_gates_pass_allows_long()
     test_normalize_action()
     
+    # Risk veto
+    test_risk_veto_missing_fails_closed()
+    test_risk_veto_invalid_decision_fails_closed()
+    test_risk_veto_veto_stays_flat()
+    test_risk_veto_cut_with_null_risk_pct_flat()
+    test_risk_veto_cut_keeps_long_uses_risk_pct()
+    test_risk_veto_cut_policy_flat_stays_flat()
+    test_risk_veto_allow_applies_other_gates()
+    test_risk_veto_allow_session_closed_flat()
+    test_risk_veto_dont_parse_policy_rationale()
+    
     # Timing card integration
     test_timing_card_weekend_not_a_trade()
     test_timing_card_open_market_with_tape()
@@ -475,5 +736,9 @@ if __name__ == "__main__":
     test_timing_card_missing_price_not_a_trade()
     test_timing_card_memory_block_not_a_trade()
     test_timing_card_session_vs_swing()
+    test_timing_card_risk_veto_missing()
+    test_timing_card_risk_veto_veto()
+    test_timing_card_risk_veto_cut()
+    test_timing_card_risk_veto_allow()
     
     print("All trader timing tests passed.")

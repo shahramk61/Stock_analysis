@@ -35,6 +35,7 @@ class TimingCard:
     - horizon: "session" or "swing"
     - entry/stop/exit: nullable prices
     - execute_action: final action after gates
+    - final_risk_pct: final risk % after all gates (may be from risk_veto)
     - would_be_flat: bool
     - reasons: list of decision reasons
     """
@@ -51,6 +52,7 @@ class TimingCard:
     current_price: Optional[float]
     tape_valid: bool
     execute_action: str
+    final_risk_pct: Optional[float]  # Final risk % (may be from risk_veto if CUT)
     would_be_flat: bool
     reasons: List[str]
     
@@ -58,6 +60,8 @@ class TimingCard:
     policy_hint_action: Optional[str] = None
     research_label: Optional[str] = None
     dual_execute_label: Optional[str] = None
+    risk_veto_decision: Optional[str] = None  # ALLOW | CUT | VETO
+    risk_veto_blocks: bool = False
     memory_blocks: bool = False
     session_blocks: bool = False
     tape_blocks: bool = False
@@ -71,6 +75,7 @@ def build_timing_card(
     policy_hint: Optional[Dict[str, Any]] = None,
     dual_recommendation: Optional[Dict[str, Any]] = None,
     decision_memory: Optional[Dict[str, Any]] = None,
+    risk_veto: Optional[Dict[str, Any]] = None,
     current_price: Optional[float] = None,
     overall_score: float = 50.0,
     atr_pct: float = 0.0,
@@ -88,6 +93,7 @@ def build_timing_card(
         policy_hint: Policy hint dict (action, conviction, stop_price, etc.)
         dual_recommendation: Dual research/execute labels
         decision_memory: Memory dict (from memory.apply_to_policy_inputs)
+        risk_veto: Risk veto object (decision, reason, missing, risk_pct)
         current_price: Current market price
         overall_score: Overall score
         atr_pct: ATR percentage
@@ -135,11 +141,12 @@ def build_timing_card(
         horizon_tighter_stop=horizon_choice.tighter_stop,
     )
     
-    # 4. Execute gate
+    # 4. Execute gate (includes risk_veto)
     gate = gate_execution(
         policy_hint=policy_hint,
         dual_recommendation=dual_recommendation,
         decision_memory=decision_memory,
+        risk_veto=risk_veto,
         session=session,
         levels=levels,
         overall_score=overall_score,
@@ -188,11 +195,14 @@ def build_timing_card(
         current_price=levels.current_price,
         tape_valid=levels.tape_valid,
         execute_action=gate.execute_action,
+        final_risk_pct=gate.final_risk_pct,
         would_be_flat=gate.would_be_flat,
         reasons=reasons,
         policy_hint_action=gate.policy_hint_action,
         research_label=gate.research_label,
         dual_execute_label=gate.dual_execute_label,
+        risk_veto_decision=gate.risk_veto_decision,
+        risk_veto_blocks=gate.risk_veto_blocks,
         memory_blocks=gate.memory_blocks,
         session_blocks=gate.session_blocks,
         tape_blocks=gate.tape_blocks,
@@ -223,6 +233,7 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
     
     policy_hint = handoff.get("policy_hint") or {}
     dual_rec = handoff.get("dual_recommendation") or {}
+    risk_veto = handoff.get("risk_veto") or None
     
     # Memory not in handoff by default (passed as empty string)
     # Could be added from journal
@@ -241,6 +252,7 @@ def extract_facts_from_handoff(handoff: Dict[str, Any]) -> Dict[str, Any]:
         "policy_hint": policy_hint,
         "dual_recommendation": dual_rec,
         "decision_memory": decision_memory,
+        "risk_veto": risk_veto,
         "current_price": handoff.get("current_price"),
         "overall_score": signals_obj.get("overall_score") or 50.0,
         "atr_pct": atr_vol.get("atr_percent") or 0.0,
@@ -293,6 +305,21 @@ def main():
         help="Policy hint action (long/flat/short)",
     )
     parser.add_argument(
+        "--risk-veto-decision",
+        choices=["ALLOW", "CUT", "VETO"],
+        help="Risk veto decision (ALLOW|CUT|VETO)",
+    )
+    parser.add_argument(
+        "--risk-veto-risk-pct",
+        type=float,
+        help="Risk veto risk percentage (for CUT decision)",
+    )
+    parser.add_argument(
+        "--risk-veto-reason",
+        default="",
+        help="Risk veto reason text",
+    )
+    parser.add_argument(
         "--output",
         help="Output JSON file path (prints to stdout if not specified)",
     )
@@ -320,11 +347,22 @@ def main():
             print("Error: --current-price required when not using --handoff", file=sys.stderr)
             return 1
         
+        # Build risk_veto from CLI args if provided
+        risk_veto = None
+        if args.risk_veto_decision:
+            risk_veto = {
+                "decision": args.risk_veto_decision,
+                "reason": args.risk_veto_reason or f"CLI risk_veto: {args.risk_veto_decision}",
+                "missing": [],
+                "risk_pct": args.risk_veto_risk_pct,
+            }
+        
         facts = {
             "ticker": args.ticker,
             "policy_hint": {"action": args.policy_action} if args.policy_action else None,
             "dual_recommendation": None,
             "decision_memory": None,
+            "risk_veto": risk_veto,
             "current_price": args.current_price,
             "overall_score": args.score,
             "atr_pct": args.atr_pct,
