@@ -9,6 +9,7 @@ Core modules:
 - pit_score: Point-in-time score computation using only asof-sliced data
 - walkforward: Walk-forward replay across date ranges
 - no_lookahead: Runtime guards and static audit for lookahead detection
+- returns_matrix: Point-in-time returns matrix and pairwise correlation
 - cli: Command-line interface for running measurements
 """
 
@@ -33,10 +34,20 @@ def audit_lookahead_risks(*args, **kwargs):
     from scripts.quant.no_lookahead import audit_lookahead_risks as _audit
     return _audit(*args, **kwargs)
 
+def compute_pit_returns_matrix(*args, **kwargs):
+    from scripts.quant.returns_matrix import compute_pit_returns_matrix as _compute
+    return _compute(*args, **kwargs)
+
+def compute_pit_pairwise_corr(*args, **kwargs):
+    from scripts.quant.returns_matrix import compute_pit_pairwise_corr as _pairwise
+    return _pairwise(*args, **kwargs)
+
 __all__ = [
     "compute_pit_score",
     "run_walkforward",
     "enable_lookahead_guard",
     "disable_lookahead_guard",
     "audit_lookahead_risks",
+    "compute_pit_returns_matrix",
+    "compute_pit_pairwise_corr",
 ]
