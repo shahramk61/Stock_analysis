@@ -29,6 +29,7 @@ from report import generate_json_report  # noqa: E402
 from agents.decision_schema import build_handoff_bundle  # noqa: E402
 from agents.quantitative_analyst.quantitative_analyst import create_quantitative_analyst  # noqa: E402
 from backtest.policy import default_policy  # noqa: E402
+from backtest.memory import load_prior_journal, DecisionMemory  # noqa: E402
 
 
 def main():
@@ -97,15 +98,51 @@ def main():
         "use_forecasts": use_forecasts,
     })
 
-    # Stateless policy hint (memory can be added later from journal)
+    # Load episodic memory from journal (if any)
+    asof_today = datetime.now().strftime("%Y-%m-%d")
+    prior_trades = load_prior_journal(str(REPO), ticker, asof_today)
+    memory = DecisionMemory(ticker=ticker)
+    for t in prior_trades:
+        memory.record_trade(t)
+    
+    # Snapshot memory as of today (current_price from fetched data)
+    current_price = float(data.get("current_price") or 0)
+    memory_snap = memory.snapshot_asof(
+        asof_today,
+        position=0.0,  # no open position in handoff (execution state)
+        current_price=current_price,
+    )
+    memory_text = memory.summary_text(memory_snap)
+    memory_dict = memory.apply_to_policy_inputs(memory_snap)
+    
+    # If no journal runs found, emit explicit "no episodic memory" ledger
+    if not prior_trades and not memory.decisions:
+        memory_text = (
+            f"[Decision Memory asof {asof_today}] ticker={ticker}\n"
+            "No episodic memory on disk (journal/runs/).\n"
+            "Active flags: none\n"
+            "Risk multiplier from memory: 1.0\n"
+            "Source: none (clean state)"
+        )
+        memory_dict = {
+            "risk_multiplier": 1.0,
+            "block_new_long": False,
+            "flags": [],
+            "loss_streak": 0,
+            "stop_cooldown_active": False,
+            "summary": memory_text,
+        }
+
+    # Policy hint (with memory if available)
     sig = default_policy(
         {**scores, "ticker": ticker},
         quant_output=quant,
-        current_price=float(data["current_price"]),
+        current_price=current_price,
         atr_pct=float((scores.get("signals") or {}).get("atr_vol", {}).get("atr_percent") or 0),
         mc_risk=(scores.get("signals") or {}).get("mc_risk"),
         profile=args.profile,
         allow_multi_horizon_entry=bool(args.multi_horizon_entry),
+        memory=memory_dict,  # inject memory into policy
     )
     policy_hint = {
         "action": sig.action,
@@ -148,11 +185,14 @@ def main():
         signals_path=str(signals_path),
         signals=signals_obj,
         quant=quant_slim,
-        memory_text="",
+        memory_text=memory_text,
         policy_hint=policy_hint,
     )
     bundle["profile"] = args.profile
     bundle["current_price"] = data.get("current_price")
+    bundle["last_print"] = data.get("current_price")  # last Close from fetch (live)
+    bundle["last_print_source"] = "fetch_stock_data"
+    bundle["last_print_date"] = asof_today
     bundle["prepared_at"] = datetime.now(timezone.utc).isoformat()
     bundle["agent_backend"] = "grok-build"
     bundle["measurement_backend"] = "scripts/pipeline"
