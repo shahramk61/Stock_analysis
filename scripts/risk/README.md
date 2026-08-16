@@ -10,6 +10,10 @@ Risk owns **size** and the **veto**. Research BUY labels do not override a VETO.
 
 Missing, non-point-in-time, or live-leaking data → **VETO**.
 
+## Machine-Readable Veto Object
+
+Both the Risk gate (`vet_trade`) and the inherited policy path (`default_policy`) expose a **`risk_veto`** object with stable keys for Trader consumption. Trader branches on `decision` only: `ALLOW` = size as given, `CUT` = use `risk_pct` (already reduced), `VETO` = do not enter / flatten (`risk_pct=0`). Schema: `{"decision": "ALLOW"|"CUT"|"VETO", "reason": "<one-line>", "reasons": [...], "missing": ["var_95",...], "risk_pct": <float>, "action": "long"|"flat", "ticker": "...", "asof": "YYYY-MM-DD"}`. Access via `RiskDecision.to_veto_object()` or `TradeSignal.risk_veto`.
+
 ## Usage
 
 ```python

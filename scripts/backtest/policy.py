@@ -41,6 +41,7 @@ class TradeSignal:
     horizon_days: Optional[int] = None
     rationale: str = ""
     raw_score: Optional[int] = None
+    risk_veto: Optional[Dict[str, Any]] = None
 
 
 def _dir_bull(s: Any) -> bool:
@@ -49,6 +50,48 @@ def _dir_bull(s: Any) -> bool:
 
 def _dir_bear(s: Any) -> bool:
     return "bear" in str(s or "").lower()
+
+
+def _build_veto_object(
+    decision: str,
+    reason: str,
+    reasons: List[str],
+    missing: List[str],
+    risk_pct: float,
+    action: str,
+    ticker: str,
+    asof: str,
+) -> Dict[str, Any]:
+    """
+    Build machine-readable veto object for Trader consumption.
+    
+    Stable schema:
+      {
+        "decision": "ALLOW" | "CUT" | "VETO",
+        "reason": "<one-line, data-grounded>",
+        "reasons": ["..."],
+        "missing": ["var_95", ...],
+        "risk_pct": <float or 0>,
+        "action": "long" | "flat",
+        "ticker": "...",
+        "asof": "YYYY-MM-DD"
+      }
+    
+    Trader branches on `decision` only:
+      ALLOW = size as given
+      CUT = use risk_pct (already reduced)
+      VETO = do not enter / flatten, risk_pct=0
+    """
+    return {
+        "decision": decision,
+        "reason": reason,
+        "reasons": reasons,
+        "missing": missing,
+        "risk_pct": risk_pct,
+        "action": action,
+        "ticker": ticker,
+        "asof": asof,
+    }
 
 
 def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -173,7 +216,7 @@ def apply_risk_filters(
     overall: float,
     *,
     session: bool = False,
-) -> Tuple[Action, float, str]:
+) -> Tuple[Action, float, str, List[str], List[str]]:
     """
     Layer risk on a proposed entry.
 
@@ -189,22 +232,35 @@ def apply_risk_filters(
       - High VaR without breakdown → deep cut
       - Elevated VaR → moderate cut
       - Soft trend/news caution → mild cut
+    
+    Returns: (action, risk, rationale, veto_reasons, missing_fields)
     """
+    veto_reasons: List[str] = []
+    missing_fields: List[str] = []
+    
     if action != "long":
-        return action, risk, rationale
+        return action, risk, rationale, veto_reasons, missing_fields
 
     # 0) Fail-closed: missing required risk data → flat
     if lev.get("var95_missing"):
+        missing_fields.append("var_95")
+        veto_reasons.append("VaR missing (fail closed)")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: VaR missing (fail closed) → flat",
+            veto_reasons,
+            missing_fields,
         )
     if lev.get("regime_missing"):
+        missing_fields.append("regime")
+        veto_reasons.append("regime missing (fail closed)")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: regime missing (fail closed) → flat",
+            veto_reasons,
+            missing_fields,
         )
 
     var95 = lev["var95"]
@@ -212,31 +268,43 @@ def apply_risk_filters(
 
     # 1) Structural / regime hard blocks
     if lev["regime_bear"]:
+        veto_reasons.append(f"Bear regime")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: Bear regime → flat",
+            veto_reasons,
+            missing_fields,
         )
     if lev["extreme_var"]:
+        veto_reasons.append(f"extreme VaR={var95}% (>{VAR_EXTREME})")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: extreme VaR={var95}% (>{VAR_EXTREME}) → flat",
+            veto_reasons,
+            missing_fields,
         )
     if lev["high_var"] and lev["structural_breakdown"]:
+        veto_reasons.append(f"VaR={var95}% + structural breakdown")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: VaR={var95}% + structural breakdown "
             f"(stack={lev['stack']}, death_cross={lev.get('death_cross')}) → flat",
+            veto_reasons,
+            missing_fields,
         )
 
     # 2) Forecast consensus block (only when multi-h is meaningful)
     if lev["consensus_bear"] and overall < 68:
+        veto_reasons.append("Bearish multi-horizon consensus")
         return (
             "flat",
             0.0,
             f"{rationale} | risk filter: Bearish multi-horizon consensus → flat",
+            veto_reasons,
+            missing_fields,
         )
 
     # 3) Graduated VaR sizing — high VaR longs need clear trend structure
@@ -249,37 +317,47 @@ def apply_risk_filters(
             or lev.get("trend_bull_strong")
         )
         if not clear_uptrend:
+            veto_reasons.append(f"high VaR={var95}% without clear uptrend")
             return (
                 "flat",
                 0.0,
                 f"{rationale} | risk filter: high VaR={var95}% without clear "
                 f"uptrend (stack={lev.get('stack')}) → flat",
+                veto_reasons,
+                missing_fields,
             )
         risk = max(0.002, risk * 0.30)
         rationale = (
             f"{rationale} | size cut: high VaR {var95}% "
             f"(clear uptrend — not flat)"
         )
+        veto_reasons.append(f"size cut: high VaR {var95}% (×0.30)")
     elif lev["elevated_var"]:
         risk = max(0.002, risk * 0.50)
         rationale = f"{rationale} | size cut: elevated VaR {var95}%"
+        veto_reasons.append(f"size cut: elevated VaR {var95}% (×0.50)")
 
     if lev["trend_bear"] and overall < 65 and not lev["structural_breakdown"]:
         # Soft technical friction (e.g. MACD bearish under bullish stack)
         risk = max(0.002, risk * 0.50)
         rationale = f"{rationale} | trend caution: MACD/ADX/SMA stack"
+        veto_reasons.append("trend caution (×0.50)")
     if lev["news_bear"]:
         risk = max(0.002, risk * 0.70)
         rationale = f"{rationale} | size cut: bearish FinBERT"
+        veto_reasons.append("bearish FinBERT (×0.70)")
 
     if session and overall < 55 and not lev["trend_bull_strong"]:
+        veto_reasons.append(f"session: score<{55} without strong trend")
         return (
             "flat",
             0.0,
             f"{rationale} | session filter: score<{55} without strong trend → flat",
+            veto_reasons,
+            missing_fields,
         )
 
-    return action, risk, rationale
+    return action, risk, rationale, veto_reasons, missing_fields
 
 
 def choose_entry(
@@ -426,7 +504,7 @@ def default_policy(
         overall, q_conv, lev, allow_multi_horizon_entry=allow_multi_horizon_entry
     )
 
-    action, risk, rationale = apply_risk_filters(
+    action, risk, rationale, veto_reasons, missing_fields = apply_risk_filters(
         action, risk, rationale, lev, overall, session=session
     )
 
@@ -448,12 +526,14 @@ def default_policy(
             risk = 0.0
             flags = ",".join(mem.get("flags") or []) or "cooldown"
             rationale = f"{rationale} | memory block: {flags}"
+            veto_reasons.append(f"memory block: {flags}")
         elif action == "long":
             mult = float(mem.get("risk_multiplier") or 1.0)
             if mult < 1.0 and risk > 0:
                 risk = max(0.002, risk * mult)
                 flags = ",".join(mem.get("flags") or []) or f"mult={mult}"
                 rationale = f"{rationale} | memory size cut: {flags}"
+                veto_reasons.append(f"memory size cut: {flags}")
 
     mcr = signals.get("mc_risk", mc_risk or {}) or {}
     if not isinstance(mcr, dict):
@@ -483,9 +563,36 @@ def default_policy(
                 horizon = int(str(h).replace("d", ""))
                 break
 
+    # Build machine-readable veto object for Trader
+    ticker = scores.get("ticker", "UNKNOWN")
+    asof = str(scores.get("asof", scores.get("timestamp", "N/A")))[:10]
+    
+    # Determine decision: VETO if flat due to risk, CUT if size reduced, ALLOW otherwise
+    decision = "ALLOW"
+    if action == "flat" and veto_reasons:
+        decision = "VETO"
+    elif veto_reasons and risk < (0.002 if action == "long" else 0):
+        # If we have reasons and risk was cut (heuristic: below entry minimums)
+        decision = "CUT"
+    elif action == "long" and risk > 0:
+        decision = "ALLOW"
+    
+    primary_reason = veto_reasons[0] if veto_reasons else "No risk issues"
+    
+    risk_veto_obj = _build_veto_object(
+        decision=decision,
+        reason=primary_reason,
+        reasons=veto_reasons,
+        missing=missing_fields,
+        risk_pct=risk,
+        action=action,
+        ticker=ticker,
+        asof=asof,
+    )
+    
     return TradeSignal(
-        ticker=scores.get("ticker", "UNKNOWN"),
-        asof=str(scores.get("asof", scores.get("timestamp", "N/A")))[:10],
+        ticker=ticker,
+        asof=asof,
         action=action,
         conviction=q_conv,
         overall_score=overall,
@@ -495,6 +602,7 @@ def default_policy(
         horizon_days=horizon,
         rationale=rationale,
         raw_score=q_raw,
+        risk_veto=risk_veto_obj,
     )
 
 

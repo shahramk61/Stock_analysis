@@ -235,6 +235,55 @@ def test_supplied_var_lly_class_still_works():
     assert "size cut" in sig.rationale
 
 
+def test_risk_veto_object_present():
+    """Machine-readable risk_veto object must be present on TradeSignal."""
+    s = _scores(65.0, stack="Bullish", golden=True, var95=15.0, regime="Neutral")
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    
+    # risk_veto must exist
+    assert sig.risk_veto is not None, "risk_veto field missing"
+    
+    # Required keys
+    assert "decision" in sig.risk_veto
+    assert "reason" in sig.risk_veto
+    assert "reasons" in sig.risk_veto
+    assert "missing" in sig.risk_veto
+    assert "risk_pct" in sig.risk_veto
+    assert "action" in sig.risk_veto
+    assert "ticker" in sig.risk_veto
+    assert "asof" in sig.risk_veto
+    
+    # decision is enum-like string
+    assert sig.risk_veto["decision"] in ("ALLOW", "CUT", "VETO")
+    
+    # When allowed, decision should be ALLOW
+    assert sig.risk_veto["decision"] == "ALLOW"
+
+
+def test_risk_veto_object_veto_on_missing_var():
+    """risk_veto.decision is VETO when VaR missing (not buried in rationale)."""
+    s = _scores(65.0, stack="Bullish", golden=True, var95=None, regime="Neutral")
+    s["signals"]["mc_risk"]["var_95"] = None
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    
+    assert sig.risk_veto is not None
+    assert sig.risk_veto["decision"] == "VETO", f"Expected VETO but got {sig.risk_veto['decision']}"
+    assert "var_95" in sig.risk_veto["missing"]
+    assert sig.action == "flat"
+
+
+def test_risk_veto_object_cut_on_elevated_var():
+    """risk_veto.decision is CUT when VaR elevated (size reduced but allowed)."""
+    s = _scores(65.0, stack="Bullish", golden=True, var95=22.0, regime="Neutral")
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    
+    assert sig.risk_veto is not None
+    # Should be CUT or ALLOW with reasons (depending on if we cut)
+    assert sig.risk_veto["decision"] in ("CUT", "ALLOW")
+    # risk_pct should be reduced
+    assert sig.suggested_risk_pct < 0.01  # was cut from base entry risk
+
+
 if __name__ == "__main__":
     test_trend_path_allows_long_mid_score()
     test_high_var_constructive_structure_size_cuts_not_flat()
@@ -255,4 +304,7 @@ if __name__ == "__main__":
     test_nan_var_flats_fail_closed()
     test_missing_regime_flats_fail_closed()
     test_supplied_var_lly_class_still_works()
+    test_risk_veto_object_present()
+    test_risk_veto_object_veto_on_missing_var()
+    test_risk_veto_object_cut_on_elevated_var()
     print("All policy leverage tests passed.")

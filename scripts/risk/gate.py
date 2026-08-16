@@ -50,6 +50,49 @@ class RiskDecision:
     def allowed(self) -> bool:
         return self.outcome == VET_ALLOW
 
+    def to_veto_object(
+        self,
+        action: str = "flat",
+        ticker: str = "",
+        asof: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Export machine-readable veto object for Trader consumption.
+        
+        Stable schema:
+          {
+            "decision": "ALLOW" | "CUT" | "VETO",
+            "reason": "<one-line, data-grounded>",
+            "reasons": ["..."],
+            "missing": ["var_95", ...],
+            "risk_pct": <float or 0>,
+            "action": "long" | "flat",
+            "ticker": "...",
+            "asof": "YYYY-MM-DD"
+          }
+        
+        Trader branches on `decision` only:
+          ALLOW = size as given
+          CUT = use risk_pct (already reduced)
+          VETO = do not enter / flatten, risk_pct=0
+        """
+        reason_details = [r.detail for r in self.reasons]
+        primary_reason = reason_details[0] if reason_details else "No issues"
+        
+        # action: if VETO, force flat
+        final_action = "flat" if self.vetoed() else str(action).strip().lower()
+        
+        return {
+            "decision": self.outcome,
+            "reason": primary_reason,
+            "reasons": reason_details,
+            "missing": self.missing,
+            "risk_pct": self.risk_pct,
+            "action": final_action,
+            "ticker": ticker,
+            "asof": asof,
+        }
+
 
 def _is_finite(val: Any) -> bool:
     """True if val is a finite number (not None, not NaN, not inf)."""

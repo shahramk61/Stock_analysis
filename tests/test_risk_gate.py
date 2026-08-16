@@ -422,6 +422,58 @@ def test_existing_position_no_concentration_veto():
     assert dec.outcome == VET_ALLOW
 
 
+def test_veto_object_schema():
+    """Risk gate exports machine-readable veto object with stable schema."""
+    dec = vet_trade(
+        action="long",
+        ticker="AAPL",
+        asof="2026-08-15",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+    )
+    
+    veto_obj = dec.to_veto_object(action="long", ticker="AAPL", asof="2026-08-15")
+    
+    # Required keys
+    assert "decision" in veto_obj
+    assert "reason" in veto_obj
+    assert "reasons" in veto_obj
+    assert "missing" in veto_obj
+    assert "risk_pct" in veto_obj
+    assert "action" in veto_obj
+    assert "ticker" in veto_obj
+    assert "asof" in veto_obj
+    
+    # decision is enum-like string
+    assert veto_obj["decision"] in ("ALLOW", "CUT", "VETO")
+    
+    # When allowed, decision is ALLOW
+    assert veto_obj["decision"] == VET_ALLOW
+    assert veto_obj["ticker"] == "AAPL"
+    assert veto_obj["asof"] == "2026-08-15"
+
+
+def test_veto_object_decision_is_veto_not_rationale():
+    """VETO is in decision field, not buried in rationale text."""
+    dec = vet_trade(
+        action="long",
+        ticker="TEST",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=None,  # missing
+        regime="Neutral",
+    )
+    
+    veto_obj = dec.to_veto_object(action="long", ticker="TEST", asof="2026-08-01")
+    
+    # Trader branches on decision field
+    assert veto_obj["decision"] == VET_VETO
+    assert veto_obj["action"] == "flat"  # forced flat
+    assert veto_obj["risk_pct"] == 0.0
+    assert "var_95" in veto_obj["missing"]
+
+
 if __name__ == "__main__":
     test_missing_var_vetoes()
     test_missing_regime_vetoes()
@@ -448,4 +500,6 @@ if __name__ == "__main__":
     test_cvar_present_passes()
     test_combined_cuts_multiply()
     test_existing_position_no_concentration_veto()
+    test_veto_object_schema()
+    test_veto_object_decision_is_veto_not_rationale()
     print("All risk gate tests passed.")
