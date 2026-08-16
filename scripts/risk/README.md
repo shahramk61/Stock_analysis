@@ -68,7 +68,7 @@ shares = size_position(
 | VaR > 30% + structural breakdown | **VETO** |
 | VaR > 30% without clear uptrend | **VETO** |
 | Stop cooldown active | **VETO** (memory) |
-| Missing CVaR when `require_cvar=True` | **VETO** (opt-in) |
+| Missing CVaR | **VETO** (always checked) |
 | Proposed notional > 0 and book is None | **VETO** (concentration) |
 | Single-name weight > 25% | **VETO** (concentration) |
 | Correlated cluster > 40% | **VETO** (concentration) |
@@ -161,21 +161,20 @@ decision = vet_trade(
 
 ## CVaR (Conditional Value at Risk)
 
-Opt-in fail-closed check with **hardcoded fallback detection**:
+**Desk Policy (Risk-Ratified): CVaR is ALWAYS checked.** Missing CVaR → VETO.
 
 ```python
 decision = vet_trade(
     ...,
-    cvar_95=22.5,         # from MC sim (must be real, not fallback)
-    require_cvar=True,    # opt-in: missing CVaR → VETO
+    cvar_95=22.5,         # from MC sim (REQUIRED, must be real, not fallback)
     mc_metadata={"paths": 10000, "simulations": 252},  # MC evidence
 )
 ```
 
 **Hard rule from CoS/Quant**: CVaR must be from actual Monte Carlo sim, not fallback.
 
-- If `require_cvar=False` (default): CVaR check not enforced
-- If `require_cvar=True`: Quant pipeline must emit `cvar_95` from MC sim; missing → VETO
+- CVaR check is enforced on every trade (not opt-in)
+- Quant pipeline must emit `cvar_95` from MC sim; missing → VETO
 
 **Fallback detection**:
 - CVaR in {20.0, 28.0} (old helper fallbacks) without MC evidence → **treat as missing → VETO**

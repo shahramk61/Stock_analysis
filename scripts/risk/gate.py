@@ -515,7 +515,6 @@ def vet_trade(
     live_leak: bool = False,
     fundamentals_pit: bool = True,
     proposed_notional: float = 0.0,
-    require_cvar: bool = False,
     mc_metadata: Optional[Dict[str, Any]] = None,
 ) -> RiskDecision:
     """
@@ -551,7 +550,6 @@ def vet_trade(
         live_leak: True if live data leaked into replay (VETO)
         fundamentals_pit: False if non-PIT fundamentals used in replay (VETO)
         proposed_notional: proposed notional for this trade (for concentration)
-        require_cvar: if True, missing CVaR → VETO (default False; opt-in)
         mc_metadata: Monte Carlo metadata (paths, simulations, fallback flags) to verify CVaR validity
 
     Returns:
@@ -620,18 +618,18 @@ def vet_trade(
             severity=VET_CUT,
         ))
 
-    # 5) CVaR (opt-in fail-closed, detects hardcoded fallbacks)
-    if require_cvar:
-        cvar_reason = _check_cvar(cvar_95, mc_metadata=mc_metadata)
-        if cvar_reason:
-            reasons.append(cvar_reason)
-            missing.append("cvar_95")
-            return RiskDecision(
-                outcome=VET_VETO,
-                risk_pct=0.0,
-                reasons=reasons,
-                missing=missing,
-            )
+    # 5) CVaR (always checked, detects hardcoded fallbacks)
+    # Desk policy: missing CVaR always VETOEs (not opt-in)
+    cvar_reason = _check_cvar(cvar_95, mc_metadata=mc_metadata)
+    if cvar_reason:
+        reasons.append(cvar_reason)
+        missing.append("cvar_95")
+        return RiskDecision(
+            outcome=VET_VETO,
+            risk_pct=0.0,
+            reasons=reasons,
+            missing=missing,
+        )
 
     # 6) Memory (cooldown → VETO; loss streak → CUT)
     mem_reason, mem_mult = _check_memory(memory_snapshot)

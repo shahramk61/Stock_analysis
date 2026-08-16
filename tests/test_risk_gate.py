@@ -24,6 +24,8 @@ def test_missing_var_vetoes():
         proposed_risk_pct=0.01,
         var_95=None,  # missing
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_VETO
     assert "var_95" in dec.missing
@@ -53,6 +55,8 @@ def test_missing_asof_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_VETO
     assert "asof" in dec.missing
@@ -67,6 +71,8 @@ def test_live_leak_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         live_leak=True,  # lookahead
     )
     assert dec.outcome == VET_VETO
@@ -82,6 +88,8 @@ def test_non_pit_fundamentals_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         fundamentals_pit=False,  # non-PIT
     )
     assert dec.outcome == VET_VETO
@@ -111,6 +119,8 @@ def test_extreme_var_vetoes():
         proposed_risk_pct=0.01,
         var_95=50.0,  # extreme
         regime="Bull",
+
+        cvar_95=22.0,
         clear_uptrend=True,
     )
     assert dec.outcome == VET_VETO
@@ -126,6 +136,8 @@ def test_high_var_with_breakdown_vetoes():
         proposed_risk_pct=0.01,
         var_95=35.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         structural_breakdown=True,  # death cross / Bearish stack
     )
     assert dec.outcome == VET_VETO
@@ -141,6 +153,8 @@ def test_high_var_without_uptrend_vetoes():
         proposed_risk_pct=0.01,
         var_95=37.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         clear_uptrend=False,  # Mixed stack
     )
     assert dec.outcome == VET_VETO
@@ -155,6 +169,7 @@ def test_high_var_with_uptrend_cuts_not_vetoes():
         asof="2026-08-01",
         proposed_risk_pct=0.01,
         var_95=31.0,
+        cvar_95=38.0,  # CVaR always required
         regime="Bull",
         clear_uptrend=True,  # Bullish stack / golden
     )
@@ -174,6 +189,8 @@ def test_elevated_var_cuts():
         proposed_risk_pct=0.01,
         var_95=22.0,
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_CUT
     assert dec.risk_pct == 0.01 * 0.5
@@ -193,6 +210,8 @@ def test_stop_cooldown_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         memory_snapshot=mem,
     )
     assert dec.outcome == VET_VETO
@@ -213,6 +232,8 @@ def test_loss_streak_cuts():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         memory_snapshot=mem,
     )
     assert dec.outcome == VET_CUT
@@ -229,6 +250,8 @@ def test_book_not_ready_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book={"AAPL": {"notional": 10_000, "sector": "Technology"}},
         book_ready=False,  # PM state
         proposed_notional=5_000,
@@ -246,6 +269,8 @@ def test_empty_book_first_add_allows():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book={},  # empty
         book_ready=True,
         sector_tags={"NEW": "Technology"},
@@ -272,6 +297,8 @@ def test_single_name_cap_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -294,6 +321,8 @@ def test_missing_sector_tag_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -320,6 +349,8 @@ def test_sector_cap_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -347,6 +378,8 @@ def test_missing_correlation_vetoes_multi_name():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -370,6 +403,8 @@ def test_first_add_missing_correlation_allows():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -398,6 +433,8 @@ def test_second_add_missing_correlation_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -437,6 +474,8 @@ def test_factor_cluster_cap_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -458,6 +497,8 @@ def test_max_names_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         sector_tags=sector_tags,
@@ -478,6 +519,8 @@ def test_research_buy_with_execute_flat_stays_flat():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Bear",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_VETO
     # Research label cannot override Risk veto
@@ -492,6 +535,8 @@ def test_position_size_zero_on_veto():
         proposed_risk_pct=0.01,
         var_95=None,  # missing → VETO
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     shares = size_position(dec, equity=100_000, price=100.0, stop_price=95.0)
     assert shares == 0
@@ -506,6 +551,8 @@ def test_position_size_nonzero_on_allow():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_ALLOW
     shares = size_position(dec, equity=100_000, price=100.0, stop_price=95.0)
@@ -522,6 +569,8 @@ def test_position_size_cut_uses_reduced_risk():
         proposed_risk_pct=0.01,
         var_95=22.0,  # elevated → ×0.5
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     assert dec.outcome == VET_CUT
     assert dec.risk_pct == 0.005
@@ -544,8 +593,8 @@ def test_flat_action_allows():
     assert dec.risk_pct == 0.0
 
 
-def test_cvar_missing_vetoes_when_required():
-    """Missing CVaR with require_cvar=True → VETO (opt-in fail closed)."""
+def test_cvar_missing_vetoes():
+    """Missing CVaR → VETO (always checked, not opt-in)."""
     dec = vet_trade(
         action="long",
         ticker="TEST",
@@ -554,7 +603,6 @@ def test_cvar_missing_vetoes_when_required():
         var_95=15.0,
         regime="Neutral",
         cvar_95=None,  # missing
-        require_cvar=True,
     )
     assert dec.outcome == VET_VETO
     assert "cvar_95" in dec.missing
@@ -570,7 +618,6 @@ def test_cvar_present_passes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=22.0,  # present
-        require_cvar=True,
     )
     assert dec.outcome == VET_ALLOW
 
@@ -589,6 +636,8 @@ def test_combined_cuts_multiply():
         proposed_risk_pct=0.01,
         var_95=22.0,  # elevated → ×0.5
         regime="Neutral",
+
+        cvar_95=22.0,
         memory_snapshot=mem,  # ×0.5
     )
     assert dec.outcome == VET_CUT
@@ -606,6 +655,8 @@ def test_existing_position_no_concentration_veto():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
         book=book,
         book_ready=True,
         proposed_notional=50_000,  # would exceed cap if new, but it's existing
@@ -623,6 +674,8 @@ def test_veto_object_schema():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     
     veto_obj = dec.to_veto_object(action="long", ticker="AAPL", asof="2026-08-15")
@@ -655,6 +708,8 @@ def test_veto_object_decision_is_veto_not_rationale():
         proposed_risk_pct=0.01,
         var_95=None,  # missing
         regime="Neutral",
+
+        cvar_95=22.0,
     )
     
     veto_obj = dec.to_veto_object(action="long", ticker="TEST", asof="2026-08-01")
@@ -676,7 +731,6 @@ def test_hardcoded_cvar_20_fallback_vetoes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=20.0,  # hardcoded fallback
-        require_cvar=True,
         mc_metadata=None,  # no MC evidence
     )
     assert dec.outcome == VET_VETO
@@ -694,7 +748,6 @@ def test_hardcoded_cvar_28_fallback_vetoes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=28.0,  # hardcoded fallback
-        require_cvar=True,
         mc_metadata={},  # empty metadata, no MC evidence
     )
     assert dec.outcome == VET_VETO
@@ -712,7 +765,6 @@ def test_cvar_20_with_mc_evidence_passes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=20.0,
-        require_cvar=True,
         mc_metadata={"paths": 10000, "simulations": 252},  # MC ran
     )
     assert dec.outcome == VET_ALLOW
@@ -728,7 +780,6 @@ def test_cvar_28_with_mc_evidence_passes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=28.0,
-        require_cvar=True,
         mc_metadata={"n_simulations": 1000, "n_paths": 5000},
     )
     assert dec.outcome == VET_ALLOW
@@ -744,7 +795,6 @@ def test_cvar_fallback_flag_vetoes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=20.0,
-        require_cvar=True,
         mc_metadata={"paths": 10000, "is_fallback": True},  # explicit fallback flag
     )
     assert dec.outcome == VET_VETO
@@ -761,10 +811,58 @@ def test_cvar_non_fallback_value_passes():
         var_95=15.0,
         regime="Neutral",
         cvar_95=22.5,  # not a fallback value
-        require_cvar=True,
         mc_metadata=None,  # no metadata needed for non-fallback values
     )
     assert dec.outcome == VET_ALLOW
+
+
+def test_historical_asof_july_2026():
+    """Historical asof (2026-07-15) with PIT inputs → ALLOW (desk run dates)."""
+    dec = vet_trade(
+        action="long",
+        ticker="AAPL",
+        asof="2026-07-15",  # historical date in desk run range
+        proposed_risk_pct=0.01,
+        var_95=18.5,
+        cvar_95=25.3,
+        regime="Neutral",
+        fundamentals_pit=True,  # PIT fundamentals
+        live_leak=False,  # no live leak
+    )
+    assert dec.outcome in (VET_ALLOW, VET_CUT)
+    # Should not veto for asof date
+
+
+def test_historical_asof_july_start():
+    """Historical asof (2026-07-01) at desk run start → works with PIT data."""
+    dec = vet_trade(
+        action="long",
+        ticker="MSFT",
+        asof="2026-07-01",  # desk run start date
+        proposed_risk_pct=0.01,
+        var_95=16.2,
+        cvar_95=22.8,
+        regime="Bull",
+        fundamentals_pit=True,
+        live_leak=False,
+    )
+    assert dec.outcome in (VET_ALLOW, VET_CUT)
+
+
+def test_historical_asof_july_end():
+    """Historical asof (2026-07-31) at desk run end → works with PIT data."""
+    dec = vet_trade(
+        action="long",
+        ticker="GOOGL",
+        asof="2026-07-31",  # desk run end date
+        proposed_risk_pct=0.01,
+        var_95=19.3,
+        cvar_95=26.7,
+        regime="Neutral",
+        fundamentals_pit=True,
+        live_leak=False,
+    )
+    assert dec.outcome in (VET_ALLOW, VET_CUT)
 
 
 if __name__ == "__main__":
@@ -796,7 +894,7 @@ if __name__ == "__main__":
     test_position_size_nonzero_on_allow()
     test_position_size_cut_uses_reduced_risk()
     test_flat_action_allows()
-    test_cvar_missing_vetoes_when_required()
+    test_cvar_missing_vetoes()
     test_cvar_present_passes()
     test_combined_cuts_multiply()
     test_existing_position_no_concentration_veto()
@@ -808,4 +906,7 @@ if __name__ == "__main__":
     test_cvar_28_with_mc_evidence_passes()
     test_cvar_fallback_flag_vetoes()
     test_cvar_non_fallback_value_passes()
+    test_historical_asof_july_2026()
+    test_historical_asof_july_start()
+    test_historical_asof_july_end()
     print("All risk gate tests passed.")
