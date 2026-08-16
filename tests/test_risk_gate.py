@@ -237,8 +237,8 @@ def test_book_not_ready_vetoes():
     assert any("book_ready" in r.detail.lower() for r in dec.reasons)
 
 
-def test_empty_book_vetoes_add():
-    """Empty book → VETO adds (cannot verify concentration)."""
+def test_empty_book_first_add_allows():
+    """Empty book → first add ALLOWS (CoS exception: cannot deadlock empty funded book)."""
     dec = vet_trade(
         action="long",
         ticker="NEW",
@@ -248,10 +248,12 @@ def test_empty_book_vetoes_add():
         regime="Neutral",
         book={},  # empty
         book_ready=True,
+        sector_tags={"NEW": "Technology"},
         proposed_notional=10_000,
     )
-    assert dec.outcome == VET_VETO
-    assert any("empty" in r.detail.lower() for r in dec.reasons)
+    # First add to empty book: skip concentration checks
+    assert dec.outcome in (VET_ALLOW, VET_CUT)
+    assert not any("empty" in r.detail.lower() for r in dec.reasons)
 
 
 def test_single_name_cap_vetoes():
@@ -328,8 +330,8 @@ def test_sector_cap_vetoes():
     assert any("sector" in r.category.lower() and "Technology" in r.detail for r in dec.reasons)
 
 
-def test_missing_correlation_vetoes():
-    """Missing PIT correlation → VETO factor cluster check (fail closed)."""
+def test_missing_correlation_vetoes_multi_name():
+    """Missing PIT correlation on multi-name add → VETO (fail closed)."""
     book = {
         "AAPL": {"notional": 50_000, "sector": "Technology"},
         "XYZ": {"notional": 50_000, "sector": "Healthcare"},
@@ -337,7 +339,7 @@ def test_missing_correlation_vetoes():
     sector_tags = {"NEW": "Finance"}  # different sector, passes sector cap
     # Total: 100k + 5k = 105k; Finance: 5k / 105k = 4.8% < 25% OK
     # Single-name: 5k / 105k = 4.8% < 10% OK
-    # But missing correlation → VETO
+    # Post-add: 3 names → correlation required → missing → VETO
     dec = vet_trade(
         action="long",
         ticker="NEW",
@@ -352,7 +354,58 @@ def test_missing_correlation_vetoes():
         proposed_notional=5_000,
     )
     assert dec.outcome == VET_VETO
-    assert any("correlation" in r.detail.lower() or "PIT" in r.detail for r in dec.reasons)
+    assert any("correlation" in r.detail.lower() or "multi-name" in r.detail.lower() for r in dec.reasons)
+
+
+def test_first_add_missing_correlation_allows():
+    """First add to empty book + missing correlation → ALLOW (CoS exception: corr undefined on 1-name book)."""
+    book = {}  # empty (cash-only conceptually)
+    sector_tags = {"AAPL": "Technology"}
+    # First add: post-add count = 1 name
+    # Correlation undefined on single-name book → skip factor cluster check
+    dec = vet_trade(
+        action="long",
+        ticker="AAPL",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations=None,  # missing, but OK for first add
+        proposed_notional=10_000,
+    )
+    # Should ALLOW or CUT (not VETO for missing corr)
+    assert dec.outcome in (VET_ALLOW, VET_CUT)
+    # Should not have correlation veto reason
+    assert not any("correlation" in r.detail.lower() for r in dec.reasons)
+
+
+def test_second_add_missing_correlation_vetoes():
+    """Second add + missing correlation → VETO (post-add ≥2 names requires corr)."""
+    book = {
+        "AAPL": {"notional": 50_000, "sector": "Technology"},
+    }
+    sector_tags = {"JNJ": "Healthcare"}  # different sector
+    # Single-name: 5k / 55k = 9.1% < 10% OK
+    # Sector: Healthcare 5k / 55k = 9.1% < 25% OK
+    # Post-add: 2 names → correlation required → missing → VETO
+    dec = vet_trade(
+        action="long",
+        ticker="JNJ",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations=None,  # missing on 2nd add
+        proposed_notional=5_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("correlation" in r.detail.lower() for r in dec.reasons)
 
 
 def test_factor_cluster_cap_vetoes():
@@ -729,11 +782,13 @@ if __name__ == "__main__":
     test_stop_cooldown_vetoes()
     test_loss_streak_cuts()
     test_book_not_ready_vetoes()
-    test_empty_book_vetoes_add()
+    test_empty_book_first_add_allows()
     test_single_name_cap_vetoes()
     test_missing_sector_tag_vetoes()
     test_sector_cap_vetoes()
-    test_missing_correlation_vetoes()
+    test_missing_correlation_vetoes_multi_name()
+    test_first_add_missing_correlation_allows()
+    test_second_add_missing_correlation_vetoes()
     test_factor_cluster_cap_vetoes()
     test_max_names_vetoes()
     test_research_buy_with_execute_flat_stays_flat()

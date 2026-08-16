@@ -145,9 +145,14 @@ decision = vet_trade(
 
 **Missing data → VETO (fail closed)**:
 - `book_ready=false` → VETO
-- Empty book → VETO
 - Missing sector tag on add → VETO (cannot prove sector cap)
-- Missing correlation → VETO factor cluster check (Quant PIT return matrix not yet available)
+- Missing correlation on **multi-name add** (post-add ≥2 names) → VETO
+
+**CoS exception (prevent deadlock on empty funded book)**:
+- **First add** to empty/cash-only book: skip concentration checks (concentration undefined on single-name book)
+- Factor cluster check requires post-add ≥2 names (correlation undefined on 1-name book)
+- First add + missing correlation → ALLOW (cannot deadlock)
+- Second add + missing correlation → VETO (fail closed on multi-name book)
 
 **Never invented**:
 - Do NOT treat missing correlation as 0

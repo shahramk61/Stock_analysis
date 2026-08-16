@@ -362,7 +362,7 @@ def _check_concentration(
     if book is not None and isinstance(book, dict) and ticker in book:
         return None
     
-    # PM state: book_ready=false or empty book → VETO adds
+    # PM state: book_ready=false → VETO adds
     if not book_ready:
         return VetoReason(
             category="book_not_ready",
@@ -370,12 +370,18 @@ def _check_concentration(
             severity=VET_VETO,
         )
     
-    if book is None or not isinstance(book, dict) or len(book) == 0:
-        return VetoReason(
-            category="empty_book",
-            detail=f"Empty book: cannot verify concentration limits when adding {ticker}",
-            severity=VET_VETO,
-        )
+    # Empty book: CoS exception for first add
+    # First add to empty/cash-only book: concentration undefined, allow to prevent deadlock
+    if book is None or not isinstance(book, dict):
+        book = {}
+    
+    current_name_count_early = len(book)
+    
+    if current_name_count_early == 0:
+        # First add to empty book: skip concentration checks
+        # Cannot deadlock an empty funded book
+        # First name cannot breach limits by itself if cash ≥10% is respected
+        return None
     
     # Check max names (ratified: 20)
     current_names = len(book)
@@ -445,13 +451,24 @@ def _check_concentration(
         )
     
     # Factor cluster (ratified: 35%) - pending Quant PIT return matrix
-    # If correlations provided, we can check; if missing → fail closed
+    # CoS exception: correlation undefined on cash-only or single-name book
+    # Skip correlation check if post-add book would have only 1 name (first add)
+    current_name_count = len(book)
+    post_add_name_count = current_name_count + 1  # adding a new name
+    
     factor_cluster_cap = CONCENTRATION_LIMITS["factor_cluster_pct"]
+    
+    if post_add_name_count == 1:
+        # First add to empty/cash-only book: correlation undefined, skip factor cluster check
+        # Cannot deadlock an empty funded book
+        return None
+    
+    # Multi-name book (post-add ≥ 2): correlation required
     if correlations is None:
-        # Correlation unavailable → cannot enforce factor cluster limit → fail closed
+        # Correlation unavailable on multi-name add → fail closed
         return VetoReason(
             category="missing_correlation",
-            detail=f"Missing PIT correlation: cannot verify factor cluster ≤ {factor_cluster_cap:.0%} (limit: factor_cluster_pct={factor_cluster_cap}, {PENDING_ENFORCEMENT['correlation']})",
+            detail=f"Missing PIT correlation: cannot verify factor cluster ≤ {factor_cluster_cap:.0%} on multi-name add (limit: factor_cluster_pct={factor_cluster_cap}, {PENDING_ENFORCEMENT['correlation']})",
             severity=VET_VETO,
         )
     
