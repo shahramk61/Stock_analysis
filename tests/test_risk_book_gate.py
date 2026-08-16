@@ -405,6 +405,191 @@ class TestBookConstraintGate(unittest.TestCase):
         self.assertIn("reasons", d)
         self.assertIn("missing", d)
     
+    def test_fractional_shares_allow(self):
+        """
+        Fractional shares: Check dollar weight vs 10% name cap, not share count.
+        
+        NAV $3000, TSLA at $342/share, ticket $300 (fractional 0.877 shares).
+        $300 is 10% of $3000 NAV → should ALLOW on name cap (not block because 1 share > 10%).
+        """
+        book = Book(nav=3000, cash=1500, asof="2026-08-16")
+        
+        decision = check_book_constraints(
+            ticker="TSLA",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=300,  # $300 ticket (fractional shares)
+            theme="EV",
+            liquidity_adv=100000000,  # Adequate liquidity
+        )
+        
+        # Should ALLOW because $300 / $3000 = 10.0% exactly (at name cap limit)
+        self.assertEqual(decision.decision, "ALLOW")
+    
+    def test_fractional_shares_small_nav_allow(self):
+        """
+        Even smaller fractional case: NAV $1000, TSLA $342, ticket $100.
+        $100 / $1000 = 10% → ALLOW.
+        """
+        book = Book(nav=1000, cash=500, asof="2026-08-16")
+        
+        decision = check_book_constraints(
+            ticker="TSLA",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=100,  # 10% of NAV
+            theme="EV",
+            liquidity_adv=100000000,
+        )
+        
+        self.assertEqual(decision.decision, "ALLOW")
+    
+    def test_fractional_shares_exceeds_blocks(self):
+        """
+        Fractional shares that exceed 10% should still BLOCK.
+        NAV $3000, ticket $350 → 11.67% → BLOCK.
+        """
+        book = Book(nav=3000, cash=1500, asof="2026-08-16")
+        
+        decision = check_book_constraints(
+            ticker="TSLA",
+            ticket_type="BUY",
+            book=book,
+            proposed_notional=350,  # Exceeds 10% of NAV
+            theme="EV",
+            liquidity_adv=100000000,
+        )
+        
+        self.assertEqual(decision.decision, "BLOCK")
+        self.assertTrue(any("single name limit" in r for r in decision.reasons))
+    
+    def test_option_sleeve_cap_enforced(self):
+        """
+        Option sleeve cap: max 20% NAV for names marked as missing 15% hurdle.
+        
+        Book has 15% in marked option sleeve names.
+        Adding 8% more marked name → 23% total → BLOCK.
+        """
+        positions = [
+            Position(
+                "SPEC1", weight_pct=8.0, theme="Speculative",
+                liquidity_adv=50000000, option_sleeve=True  # Marked
+            ),
+            Position(
+                "SPEC2", weight_pct=7.0, theme="Speculative",
+                liquidity_adv=40000000, hurdle_15pct="miss"  # Marked
+            ),
+            Position(
+                "CORE", weight_pct=10.0, theme="Core",
+                liquidity_adv=500000000  # Not marked (no option sleeve)
+            ),
+        ]
+        book = Book(nav=1000000, cash=500000, positions=positions, asof="2026-08-16")
+        
+        # Current option sleeve: 8% + 7% = 15%
+        self.assertEqual(book.option_sleeve_exposure(), 15.0)
+        
+        # Try to add 8% more marked name → would be 23%
+        decision = check_book_constraints(
+            ticker="SPEC3",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=8.0,
+            theme="Speculative",
+            liquidity_adv=30000000,
+            option_sleeve=True,  # Marked for option sleeve
+        )
+        
+        self.assertEqual(decision.decision, "BLOCK")
+        self.assertTrue(any("option sleeve" in r.lower() for r in decision.reasons))
+    
+    def test_option_sleeve_unmarked_not_counted(self):
+        """
+        Unmarked names (no option_sleeve or hurdle_15pct mark) should NOT count toward sleeve.
+        Do not invent or guess marks.
+        """
+        positions = [
+            Position(
+                "SPEC1", weight_pct=8.0, theme="Speculative",
+                liquidity_adv=50000000, option_sleeve=True  # Marked
+            ),
+            Position(
+                "CORE1", weight_pct=10.0, theme="Core",
+                liquidity_adv=500000000  # Not marked
+            ),
+            Position(
+                "CORE2", weight_pct=9.0, theme="Core",
+                liquidity_adv=400000000  # Not marked
+            ),
+        ]
+        book = Book(nav=1000000, cash=500000, positions=positions, asof="2026-08-16")
+        
+        # Only SPEC1 is marked → 8% in sleeve
+        self.assertEqual(book.option_sleeve_exposure(), 8.0)
+        
+        # Add 10% more marked name → 8% + 10% = 18% (under 20% limit) → ALLOW
+        decision = check_book_constraints(
+            ticker="SPEC2",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=10.0,  # Under single name 10% limit
+            theme="Speculative",
+            liquidity_adv=40000000,
+            hurdle_15pct="miss",  # Marked via hurdle flag
+            correlation_data={"SPEC1": 0.2, "CORE1": 0.1, "CORE2": 0.1},
+        )
+        
+        self.assertEqual(decision.decision, "ALLOW")
+    
+    def test_option_sleeve_exactly_at_cap_allows(self):
+        """Adding to option sleeve exactly at 20% cap should ALLOW."""
+        positions = [
+            Position(
+                "SPEC1", weight_pct=10.0, theme="Speculative",
+                liquidity_adv=50000000, option_sleeve=True
+            ),
+        ]
+        book = Book(nav=1000000, cash=500000, positions=positions, asof="2026-08-16")
+        
+        # Add 10% more → exactly 20% → ALLOW
+        decision = check_book_constraints(
+            ticker="SPEC2",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=10.0,
+            theme="Speculative",
+            liquidity_adv=40000000,
+            option_sleeve=True,
+            correlation_data={"SPEC1": 0.3},
+        )
+        
+        self.assertEqual(decision.decision, "ALLOW")
+    
+    def test_option_sleeve_one_over_cap_blocks(self):
+        """Adding to option sleeve 0.1% over 20% cap should BLOCK."""
+        positions = [
+            Position(
+                "SPEC1", weight_pct=10.0, theme="Speculative",
+                liquidity_adv=50000000, option_sleeve=True
+            ),
+        ]
+        book = Book(nav=1000000, cash=500000, positions=positions, asof="2026-08-16")
+        
+        # Add 10.1% more → 20.1% → BLOCK
+        decision = check_book_constraints(
+            ticker="SPEC2",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=10.1,
+            theme="Speculative",
+            liquidity_adv=40000000,
+            option_sleeve=True,
+            correlation_data={"SPEC1": 0.3},
+        )
+        
+        self.assertEqual(decision.decision, "BLOCK")
+        self.assertTrue(any("option sleeve" in r.lower() for r in decision.reasons))
+    
     def test_liquidity_constraint_enforced(self):
         """Test that position size vs ADV is enforced."""
         book = Book(nav=1000000, cash=500000, asof="2026-08-16")
@@ -479,6 +664,50 @@ class TestBookHelpers(unittest.TestCase):
         
         missing_exposure = book.sector_theme_exposure("Finance")
         self.assertEqual(missing_exposure, 0.0)
+    
+    def test_book_option_sleeve_exposure(self):
+        """Test option sleeve exposure calculation (marked names only)."""
+        positions = [
+            Position("SPEC1", weight_pct=8.0, option_sleeve=True),  # Marked
+            Position("SPEC2", weight_pct=7.0, hurdle_15pct="miss"),  # Marked
+            Position("CORE", weight_pct=10.0),  # Not marked
+            Position("GROWTH", weight_pct=5.0, hurdle_15pct="pass"),  # Not marked (pass)
+        ]
+        book = Book(positions=positions)
+        
+        # Only SPEC1 and SPEC2 count → 8 + 7 = 15%
+        sleeve_exposure = book.option_sleeve_exposure()
+        self.assertEqual(sleeve_exposure, 15.0)
+    
+    def test_position_is_option_sleeve(self):
+        """Test Position.is_option_sleeve() logic."""
+        # Marked via option_sleeve=True
+        pos1 = Position("SPEC1", option_sleeve=True)
+        self.assertTrue(pos1.is_option_sleeve())
+        
+        # Marked via hurdle_15pct="miss"
+        pos2 = Position("SPEC2", hurdle_15pct="miss")
+        self.assertTrue(pos2.is_option_sleeve())
+        
+        # Marked via hurdle_15pct="MISS" (case insensitive)
+        pos3 = Position("SPEC3", hurdle_15pct="MISS")
+        self.assertTrue(pos3.is_option_sleeve())
+        
+        # Not marked (None)
+        pos4 = Position("CORE1")
+        self.assertFalse(pos4.is_option_sleeve())
+        
+        # Not marked (option_sleeve=False)
+        pos5 = Position("CORE2", option_sleeve=False)
+        self.assertFalse(pos5.is_option_sleeve())
+        
+        # Not marked (hurdle_15pct="pass")
+        pos6 = Position("GROWTH", hurdle_15pct="pass")
+        self.assertFalse(pos6.is_option_sleeve())
+        
+        # Both marked (True takes precedence)
+        pos7 = Position("SPEC4", option_sleeve=True, hurdle_15pct="pass")
+        self.assertTrue(pos7.is_option_sleeve())
 
 
 if __name__ == "__main__":

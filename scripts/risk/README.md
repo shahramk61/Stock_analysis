@@ -36,15 +36,18 @@ Defined in `scripts/risk/limits.py`:
 | Constraint | Limit | Notes |
 |------------|-------|-------|
 | Min cash | 10% of NAV | Pre-trade check |
-| Max single name | 10% of NAV | Post-trade weight |
+| Max single name | 10% of NAV | Post-trade weight (dollar-based, supports fractional shares) |
 | Max sector/theme | 25% of NAV | Post-trade exposure |
 | Max factor cluster | 35% of NAV | Correlated positions (requires correlation data for multi-name ADD) |
+| **Max option sleeve** | **20% of NAV** | **Names marked by Coverage/CIO as missing 15% five-year hurdle** |
 | Max names | 20 | Total positions in book |
 | Liquidity | Position < ADV / 20 | For liquid exit; fail closed if ADV missing |
 | Theme purity | Required | All positions must have theme tag |
 
 ### Special Rules
 
+- **Fractional shares**: Check dollar weight vs. 10% name cap, not whole-share count. Don't block a BUY if the ticket notional is ≤10% of NAV, even if 1 share costs more than 10% of NAV.
+- **Option sleeve**: Only count positions where Coverage/CIO has marked `option_sleeve=True` OR `hurdle_15pct="miss"`. If the mark is missing, do NOT guess—do not count toward sleeve.
 - **First add exception**: First BUY into a new name does **not** require correlation data
 - **Multi-name ADD**: Requires correlation data to validate factor cluster exposure
 - **Stranded book**: TRIM/SELL that would drop below 3 names or orphan a theme → FLAG (not BLOCK)
@@ -101,6 +104,60 @@ decision = check_book_constraints(
 assert decision.decision == "ALLOW"
 assert decision.cio_approved == True
 # Book constraints do NOT veto holds for VaR/regime
+```
+
+### Fractional Shares
+
+```python
+# Fractional shares: check dollar weight, not share count
+# NAV $3000, TSLA at $342/share, ticket $300 (fractional 0.877 shares)
+book = Book(nav=3000, cash=1500, asof="2026-08-16")
+
+decision = check_book_constraints(
+    ticker="TSLA",
+    ticket_type="BUY",
+    book=book,
+    proposed_notional=300,  # $300 / $3000 = 10% → ALLOW
+    theme="EV",
+    liquidity_adv=100_000_000,
+)
+
+assert decision.decision == "ALLOW"
+# Don't block just because 1 share > 10% NAV if the ticket notional is ≤10%
+```
+
+### Option Sleeve Cap
+
+```python
+# Option sleeve: max 20% NAV for names marked as missing 15% hurdle
+# Only count positions where Coverage/CIO has marked:
+#   - option_sleeve=True, OR
+#   - hurdle_15pct="miss"
+# Do not invent marks; if missing, do not count toward sleeve
+
+positions = [
+    Position("SPEC1", weight_pct=8.0, option_sleeve=True),  # Counts
+    Position("SPEC2", weight_pct=7.0, hurdle_15pct="miss"),  # Counts
+    Position("CORE", weight_pct=10.0),  # Does NOT count (unmarked)
+]
+book = Book(nav=1_000_000, cash=500_000, positions=positions, asof="2026-08-16")
+
+# Current option sleeve: 8% + 7% = 15%
+assert book.option_sleeve_exposure() == 15.0
+
+# Try to add 8% more marked name → would be 23% → BLOCK
+decision = check_book_constraints(
+    ticker="SPEC3",
+    ticket_type="BUY",
+    book=book,
+    proposed_weight_pct=8.0,
+    theme="Speculative",
+    liquidity_adv=30_000_000,
+    option_sleeve=True,  # Coverage/CIO mark
+)
+
+assert decision.decision == "BLOCK"
+assert any("option sleeve" in r.lower() for r in decision.reasons)
 ```
 
 ### Stranded Book Check (TRIM/SELL)
@@ -200,10 +257,13 @@ signals → score → Research label (BUY/HOLD/SELL)
 ### What Risk DOES Do
 
 - ✅ Block BUY/ADD that breaks cash, name, sector/theme, liquidity, or purity limits
+- ✅ Block BUY/ADD that exceeds option sleeve cap (20% for marked names)
+- ✅ Check dollar weight for name cap (fractional shares supported)
 - ✅ FLAG TRIM/SELL that strands the book
 - ✅ Fail closed on missing data (NAV, asof, liquidity)
 - ✅ Enforce theme purity (all positions must have tags)
 - ✅ Validate factor cluster exposure (with correlation data for multi-name ADD)
+- ✅ Do NOT count unmarked names toward option sleeve (no invented marks)
 
 ---
 

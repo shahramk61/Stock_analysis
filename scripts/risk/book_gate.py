@@ -37,6 +37,8 @@ class Position:
         sector: Optional[str] = None,
         theme: Optional[str] = None,
         liquidity_adv: Optional[float] = None,
+        option_sleeve: Optional[bool] = None,
+        hurdle_15pct: Optional[str] = None,
     ):
         self.ticker = ticker.upper()
         self.weight_pct = weight_pct
@@ -44,6 +46,27 @@ class Position:
         self.sector = sector
         self.theme = theme
         self.liquidity_adv = liquidity_adv
+        # Option sleeve: Coverage/CIO marks names missing 15% five-year hurdle
+        # option_sleeve=True OR hurdle_15pct="miss" means it counts toward sleeve
+        # If both are None/missing, do NOT count toward sleeve (do not guess)
+        self.option_sleeve = option_sleeve
+        self.hurdle_15pct = hurdle_15pct
+    
+    def is_option_sleeve(self) -> bool:
+        """
+        Check if this position is marked for the option sleeve.
+        
+        Only counts if Coverage/CIO has explicitly marked it:
+        - option_sleeve=True, OR
+        - hurdle_15pct="miss"
+        
+        If neither is set, returns False (do not guess).
+        """
+        if self.option_sleeve is True:
+            return True
+        if self.hurdle_15pct and self.hurdle_15pct.lower() == "miss":
+            return True
+        return False
 
 
 class Book:
@@ -86,6 +109,22 @@ class Book:
         total = 0.0
         for pos in self.positions:
             if pos.sector == sector_or_theme or pos.theme == sector_or_theme:
+                total += pos.weight_pct
+        return total
+    
+    def option_sleeve_exposure(self) -> float:
+        """
+        Total weight % for option sleeve (names marked as missing 15% hurdle).
+        
+        Only counts positions where Coverage/CIO has marked:
+        - option_sleeve=True, OR
+        - hurdle_15pct="miss"
+        
+        Do not guess or invent marks.
+        """
+        total = 0.0
+        for pos in self.positions:
+            if pos.is_option_sleeve():
                 total += pos.weight_pct
         return total
 
@@ -168,6 +207,8 @@ def check_book_constraints(
     liquidity_adv: Optional[float] = None,
     cio_approved: bool = False,
     correlation_data: Optional[Dict[str, float]] = None,
+    option_sleeve: Optional[bool] = None,
+    hurdle_15pct: Optional[str] = None,
 ) -> RiskDecision:
     """
     Validate a proposed ticket against fund-level book constraints.
@@ -183,6 +224,8 @@ def check_book_constraints(
         liquidity_adv: Average daily volume $ for liquidity checks
         cio_approved: Whether this HOLD is CIO-approved (bypasses VaR blocks)
         correlation_data: Dict of ticker -> correlation for factor cluster checks
+        option_sleeve: Coverage/CIO mark: True if missing 15% five-year hurdle
+        hurdle_15pct: Coverage/CIO mark: "miss" if missing 15% five-year hurdle
     
     Returns:
         RiskDecision with ALLOW, BLOCK, or FLAG
@@ -260,6 +303,8 @@ def check_book_constraints(
             liquidity_adv=liquidity_adv,
             cio_approved=cio_approved,
             correlation_data=correlation_data,
+            option_sleeve=option_sleeve,
+            hurdle_15pct=hurdle_15pct,
             reasons=reasons,
             missing=missing,
         )
@@ -300,12 +345,15 @@ def _check_buy_add_constraints(
     liquidity_adv: Optional[float],
     cio_approved: bool,
     correlation_data: Optional[Dict[str, float]],
+    option_sleeve: Optional[bool],
+    hurdle_15pct: Optional[str],
     reasons: List[str],
     missing: List[str],
 ) -> RiskDecision:
     """Check constraints for BUY/ADD tickets."""
     
     # Calculate proposed weight if not provided
+    # Fractional shares: check dollar weight vs 10% name cap, not whole-share count
     if proposed_weight_pct is None:
         if proposed_notional is not None and book.nav and book.nav > 0:
             proposed_weight_pct = (proposed_notional / book.nav) * 100.0
@@ -343,7 +391,7 @@ def _check_buy_add_constraints(
     
     # Post-trade checks
     if proposed_weight_pct is not None:
-        # Single name concentration
+        # Single name concentration (dollar weight, handles fractional shares)
         if proposed_weight_pct > limits.MAX_SINGLE_NAME_PCT:
             reasons.append(
                 f"Position weight {proposed_weight_pct:.1f}% exceeds "
@@ -361,6 +409,24 @@ def _check_buy_add_constraints(
                         f"Sector/theme '{sector_theme_key}' exposure {post_trade_sector_theme:.1f}% "
                         f"exceeds limit {limits.MAX_SECTOR_THEME_PCT}%"
                     )
+        
+        # Option sleeve cap: max 20% for names marked as missing 15% hurdle
+        # Only count if Coverage/CIO has marked option_sleeve=True or hurdle_15pct="miss"
+        # Do not invent the mark; if missing, do not count toward sleeve
+        is_option_sleeve_name = False
+        if option_sleeve is True:
+            is_option_sleeve_name = True
+        elif hurdle_15pct and hurdle_15pct.lower() == "miss":
+            is_option_sleeve_name = True
+        
+        if is_option_sleeve_name:
+            current_option_sleeve = book.option_sleeve_exposure()
+            post_trade_option_sleeve = current_option_sleeve + proposed_weight_pct
+            if post_trade_option_sleeve > limits.MAX_OPTION_SLEEVE_PCT:
+                reasons.append(
+                    f"Option sleeve exposure {post_trade_option_sleeve:.1f}% exceeds "
+                    f"limit {limits.MAX_OPTION_SLEEVE_PCT}% (names missing 15% hurdle)"
+                )
         
         # Cash constraint
         post_trade_cash_pct = book.cash_pct

@@ -36,6 +36,12 @@ REQUIRE_THEME_TAG: Final[bool] = True
 # Multi-name ADD requires correlation for cluster validation
 REQUIRE_CORR_FOR_MULTI_NAME_ADD: Final[bool] = True
 
+# Option sleeve cap
+# Max % of NAV for names marked as missing 15% five-year hurdle
+# Only counts names where Coverage/CIO has marked option_sleeve=True or hurdle_15pct="miss"
+# Do not invent this mark; if missing, do not count toward sleeve
+MAX_OPTION_SLEEVE_PCT: Final[float] = 20.0
+
 # Stranded book thresholds (for TRIM/SELL flagging)
 # Flag if a SELL would leave cash below this absolute minimum
 STRANDED_CASH_FLOOR_PCT: Final[float] = 5.0
@@ -55,6 +61,7 @@ def get_limits_summary() -> dict:
         "max_single_name_pct": MAX_SINGLE_NAME_PCT,
         "max_sector_theme_pct": MAX_SECTOR_THEME_PCT,
         "max_factor_cluster_pct": MAX_FACTOR_CLUSTER_PCT,
+        "max_option_sleeve_pct": MAX_OPTION_SLEEVE_PCT,
         "max_names": MAX_NAMES,
         "min_names": MIN_NAMES,
         "min_liquidity_adv_multiplier": MIN_LIQUIDITY_ADV_MULTIPLIER,
