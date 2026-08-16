@@ -92,6 +92,19 @@ def compute_pit_score(
 
     # ── PRICE-BASED SIGNALS (asof-safe) ──────────────────────────────────────
     signals = {}
+    
+    # Last print: last Close from asof-sliced hist
+    last_print = None
+    last_print_date = None
+    if len(hist) > 0:
+        try:
+            last_print = float(hist["Close"].iloc[-1])
+            last_print_date = str(hist.index[-1].date())
+            availability["last_print"] = "computed"
+        except Exception:
+            availability["last_print"] = "unavailable"
+    else:
+        availability["last_print"] = "unavailable"
 
     try:
         signals["ivr"] = get_iv_rank_and_skew(ticker, **kw)
@@ -409,6 +422,9 @@ def compute_pit_score(
             "esg_quality": round(esg_quality, 1),
             "risk": round(risk_score, 1),
         },
+        "last_print": last_print,
+        "last_print_date": last_print_date,
+        "last_print_source": "hist_close_asof",
         "availability": availability,
         "signals": signals,
         "use_forecasts": use_forecasts,

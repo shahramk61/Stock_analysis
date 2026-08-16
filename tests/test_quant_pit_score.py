@@ -249,5 +249,67 @@ def test_pit_score_cvar_95_unavailable_with_short_hist():
     assert mc_risk.get("cvar_95") is None or "unavailable" in result["availability"]["mc_risk"]
 
 
+def test_pit_score_last_print_from_asof_sliced_hist():
+    """Last print should be the last Close from asof-sliced hist."""
+    hist = _synthetic_hist(260)
+    asof = hist.index[180]
+
+    result = compute_pit_score(ticker="TEST", asof=asof, hist=hist.loc[:asof])
+
+    # Check that last_print is present
+    assert "last_print" in result
+    assert result["last_print"] is not None
+    assert result["availability"]["last_print"] == "computed"
+
+    # Last print should equal the last Close in the asof-sliced hist
+    expected_last_print = float(hist.loc[:asof, "Close"].iloc[-1])
+    assert result["last_print"] == expected_last_print
+
+    # Last print date should match
+    expected_date = str(hist.loc[:asof].index[-1].date())
+    assert result["last_print_date"] == expected_date
+
+    # Source should indicate it's from hist
+    assert result["last_print_source"] == "hist_close_asof"
+
+
+def test_pit_score_last_print_invariant_to_future_mutation():
+    """Last print at asof-T should not change if future bars are mutated."""
+    hist = _synthetic_hist(260)
+    asof_idx = 180
+    asof_date = hist.index[asof_idx]
+    future_idx = 200
+
+    # Compute with original hist
+    hist_asof1 = hist.loc[:asof_date].copy()
+    result1 = compute_pit_score(ticker="TEST", asof=asof_date, hist=hist_asof1)
+
+    # Mutate a future bar
+    hist_mutated = hist.copy()
+    hist_mutated.loc[hist_mutated.index[future_idx], "Close"] *= 10.0
+
+    # Compute again with mutated hist (sliced to same asof)
+    hist_asof2 = hist_mutated.loc[:asof_date].copy()
+    result2 = compute_pit_score(ticker="TEST", asof=asof_date, hist=hist_asof2)
+
+    # Last print must be identical
+    assert result1["last_print"] == result2["last_print"]
+    assert result1["last_print_date"] == result2["last_print_date"]
+
+
+def test_pit_score_last_print_unavailable_with_empty_hist():
+    """Last print should be unavailable (not 0.0 or fabricated) with empty hist."""
+    # Empty history
+    hist = _synthetic_hist(0)  # Empty dataframe
+
+    result = compute_pit_score(ticker="TEST", asof="2023-01-01", hist=hist)
+
+    # Should have an error or mark last_print unavailable
+    if "error" not in result:
+        assert result["availability"]["last_print"] == "unavailable"
+        # Last print should be None, not 0.0 or any fabricated value
+        assert result["last_print"] is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
