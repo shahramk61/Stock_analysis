@@ -209,6 +209,8 @@ def check_book_constraints(
     correlation_data: Optional[Dict[str, float]] = None,
     option_sleeve: Optional[bool] = None,
     hurdle_15pct: Optional[str] = None,
+    cio_sized: bool = False,
+    cash_memo: bool = False,
 ) -> RiskDecision:
     """
     Validate a proposed ticket against fund-level book constraints.
@@ -226,6 +228,8 @@ def check_book_constraints(
         correlation_data: Dict of ticker -> correlation for factor cluster checks
         option_sleeve: Coverage/CIO mark: True if missing 15% five-year hurdle
         hurdle_15pct: Coverage/CIO mark: "miss" if missing 15% five-year hurdle
+        cio_sized: CIO has sized the book (suppresses completeness flag)
+        cash_memo: CIO has written a cash memo (suppresses completeness flag)
     
     Returns:
         RiskDecision with ALLOW, BLOCK, or FLAG
@@ -267,7 +271,8 @@ def check_book_constraints(
     # CIO-approved holds especially should pass through
     if ticket_type == "HOLD":
         if cio_approved:
-            return RiskDecision(
+            # Check book completeness flag before returning
+            decision = RiskDecision(
                 decision="ALLOW",
                 reason="CIO-approved HOLD - book constraints not blocking",
                 ticker=ticker,
@@ -279,7 +284,7 @@ def check_book_constraints(
             )
         else:
             # Regular hold - still don't block on VaR/regime
-            return RiskDecision(
+            decision = RiskDecision(
                 decision="ALLOW",
                 reason="HOLD not subject to VaR/regime gates",
                 ticker=ticker,
@@ -289,10 +294,14 @@ def check_book_constraints(
                 missing=missing,
                 cio_approved=cio_approved,
             )
+        
+        # Add book completeness flag if applicable (never BLOCK)
+        _check_book_completeness_flag(book, decision, cio_sized, cash_memo)
+        return decision
     
     # 3. BUY/ADD constraint checks
     if ticket_type in ("BUY", "ADD"):
-        return _check_buy_add_constraints(
+        decision = _check_buy_add_constraints(
             ticker=ticker,
             ticket_type=ticket_type,
             book=book,
@@ -308,10 +317,16 @@ def check_book_constraints(
             reasons=reasons,
             missing=missing,
         )
+        
+        # Add book completeness flag if decision is ALLOW (never BLOCK)
+        if decision.decision == "ALLOW":
+            _check_book_completeness_flag(book, decision, cio_sized, cash_memo)
+        
+        return decision
     
     # 4. TRIM/SELL constraint checks
     if ticket_type in ("TRIM", "SELL"):
-        return _check_trim_sell_constraints(
+        decision = _check_trim_sell_constraints(
             ticker=ticker,
             ticket_type=ticket_type,
             book=book,
@@ -320,6 +335,12 @@ def check_book_constraints(
             missing=missing,
             cio_approved=cio_approved,
         )
+        
+        # Add book completeness flag if decision is ALLOW or FLAG (never BLOCK)
+        if decision.decision in ("ALLOW", "FLAG"):
+            _check_book_completeness_flag(book, decision, cio_sized, cash_memo)
+        
+        return decision
     
     # Unknown ticket type
     return RiskDecision(
@@ -613,3 +634,49 @@ def _check_trim_sell_constraints(
         missing=missing,
         cio_approved=cio_approved,
     )
+
+
+def _check_book_completeness_flag(
+    book: Book,
+    decision: RiskDecision,
+    cio_sized: bool,
+    cash_memo: bool,
+) -> None:
+    """
+    Add book completeness FLAG if the book is under-invested.
+    
+    FLAG when n_names < 5 AND cash_pct > 50% (idle capital warning).
+    The FLAG dies (not emitted) when CIO has sized the book or written a cash memo.
+    Default: FLAG (fail closed - if we don't know, warn).
+    
+    Never BLOCK on this condition - only FLAG.
+    
+    This mutates the decision in place to add the flag.
+    """
+    # If CIO has sized the book or written a cash memo, suppress the flag
+    if cio_sized or cash_memo:
+        return
+    
+    # Check completeness thresholds
+    if book.num_names < limits.COMPLETENESS_MIN_NAMES:
+        cash_pct = book.cash_pct
+        if cash_pct is not None and cash_pct > limits.COMPLETENESS_MAX_CASH_PCT:
+            # Under-invested: too few names and too much idle cash
+            completeness_msg = (
+                f"Book completeness: {book.num_names} names < {limits.COMPLETENESS_MIN_NAMES} "
+                f"and {cash_pct:.1f}% cash > {limits.COMPLETENESS_MAX_CASH_PCT}% "
+                "(under-invested; awaiting CIO sizing or cash memo)"
+            )
+            
+            # Add FLAG (never BLOCK)
+            # If decision was ALLOW, upgrade to FLAG with completeness warning
+            if decision.decision == "ALLOW":
+                decision.decision = "FLAG"
+                decision.reason = completeness_msg
+            # If already FLAG, keep FLAG but add completeness to reasons
+            elif decision.decision == "FLAG":
+                # Add to reasons but keep existing primary reason
+                pass
+            
+            # Add to reasons list (always append)
+            decision.reasons.append(completeness_msg)

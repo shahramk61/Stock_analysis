@@ -589,6 +589,232 @@ class TestBookConstraintGate(unittest.TestCase):
         
         self.assertEqual(decision.decision, "BLOCK")
         self.assertTrue(any("option sleeve" in r.lower() for r in decision.reasons))
+
+
+class TestBookCompletenessFlag(unittest.TestCase):
+    """Test suite for book completeness FLAG (under-invested warning)."""
+    
+    def test_empty_ish_book_flags(self):
+        """
+        Empty-ish book: 2 names, 80% cash, no CIO sizing → ALLOW + completeness FLAG.
+        
+        Rule: FLAG when n_names < 5 AND cash_pct > 50%.
+        Never BLOCK - tickets still ALLOW if other constraints pass.
+        """
+        positions = [
+            Position("AAPL", weight_pct=10.0, theme="Tech", liquidity_adv=500000000),
+            Position("XOM", weight_pct=10.0, theme="Energy", liquidity_adv=200000000),
+        ]
+        book = Book(nav=1000000, cash=800000, positions=positions, asof="2026-08-16")
+        
+        # 2 names < 5, 80% cash > 50% → should FLAG
+        self.assertEqual(book.num_names, 2)
+        self.assertEqual(book.cash_pct, 80.0)
+        
+        # Try to BUY - should ALLOW (constraints pass) but FLAG for completeness
+        decision = check_book_constraints(
+            ticker="GOOGL",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=8.0,
+            theme="Cloud",  # Different theme to avoid sector/theme limit
+            liquidity_adv=300000000,
+            correlation_data={"AAPL": 0.3, "XOM": 0.1},
+            cio_sized=False,  # No CIO sizing
+        )
+        
+        # Should FLAG (not BLOCK) with completeness warning
+        self.assertEqual(decision.decision, "FLAG")
+        self.assertTrue(any("completeness" in r.lower() for r in decision.reasons))
+        self.assertTrue(any("under-invested" in r.lower() for r in decision.reasons))
+        
+        # Verify it's a FLAG, not a BLOCK
+        self.assertNotEqual(decision.decision, "BLOCK")
+    
+    def test_empty_ish_book_cio_sized_no_flag(self):
+        """
+        Same empty-ish book (2 names, 80% cash) but CIO sized → no completeness FLAG.
+        
+        The FLAG dies when CIO has sized the book.
+        """
+        positions = [
+            Position("AAPL", weight_pct=10.0, theme="Tech", liquidity_adv=500000000),
+            Position("XOM", weight_pct=10.0, theme="Energy", liquidity_adv=200000000),
+        ]
+        book = Book(nav=1000000, cash=800000, positions=positions, asof="2026-08-16")
+        
+        decision = check_book_constraints(
+            ticker="GOOGL",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=8.0,
+            theme="Cloud",
+            liquidity_adv=300000000,
+            correlation_data={"AAPL": 0.3, "XOM": 0.1},
+            cio_sized=True,  # CIO has sized the book
+        )
+        
+        # Should ALLOW without completeness flag
+        self.assertEqual(decision.decision, "ALLOW")
+        self.assertFalse(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_empty_ish_book_cash_memo_no_flag(self):
+        """
+        Same empty-ish book but cash memo written → no completeness FLAG.
+        
+        The FLAG dies when CIO has written a cash memo.
+        """
+        positions = [
+            Position("AAPL", weight_pct=10.0, theme="Tech", liquidity_adv=500000000),
+            Position("XOM", weight_pct=10.0, theme="Energy", liquidity_adv=200000000),
+        ]
+        book = Book(nav=1000000, cash=800000, positions=positions, asof="2026-08-16")
+        
+        decision = check_book_constraints(
+            ticker="GOOGL",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=8.0,
+            theme="Cloud",
+            liquidity_adv=300000000,
+            correlation_data={"AAPL": 0.3, "XOM": 0.1},
+            cash_memo=True,  # CIO has written cash memo
+        )
+        
+        # Should ALLOW without completeness flag
+        self.assertEqual(decision.decision, "ALLOW")
+        self.assertFalse(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_enough_names_no_flag(self):
+        """
+        5 names, 70% cash → no completeness FLAG (n_names < 5 is false).
+        
+        Need BOTH conditions (< 5 names AND > 50% cash) to flag.
+        """
+        positions = [
+            Position("TICK1", weight_pct=6.0, theme="Tech", liquidity_adv=100000000),
+            Position("TICK2", weight_pct=6.0, theme="Energy", liquidity_adv=100000000),
+            Position("TICK3", weight_pct=6.0, theme="Finance", liquidity_adv=100000000),
+            Position("TICK4", weight_pct=6.0, theme="Healthcare", liquidity_adv=100000000),
+            Position("TICK5", weight_pct=6.0, theme="Consumer", liquidity_adv=100000000),
+        ]
+        book = Book(nav=1000000, cash=700000, positions=positions, asof="2026-08-16")
+        
+        # 5 names (not < 5), 70% cash (> 50%) → no flag
+        self.assertEqual(book.num_names, 5)
+        self.assertEqual(book.cash_pct, 70.0)
+        
+        decision = check_book_constraints(
+            ticker="NEWTICK",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=5.0,
+            theme="Industrial",  # Different theme
+            liquidity_adv=80000000,
+            correlation_data={f"TICK{i}": 0.2 for i in range(1, 6)},
+            cio_sized=False,
+        )
+        
+        # Should ALLOW without completeness flag
+        self.assertEqual(decision.decision, "ALLOW")
+        self.assertFalse(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_low_cash_no_flag(self):
+        """
+        2 names, 40% cash → no completeness FLAG (cash_pct > 50% is false).
+        
+        Need BOTH conditions to flag.
+        """
+        positions = [
+            Position("AAPL", weight_pct=30.0, theme="Tech", liquidity_adv=500000000),
+            Position("XOM", weight_pct=30.0, theme="Energy", liquidity_adv=200000000),
+        ]
+        book = Book(nav=1000000, cash=400000, positions=positions, asof="2026-08-16")
+        
+        # 2 names (< 5), 40% cash (not > 50%) → no flag
+        self.assertEqual(book.num_names, 2)
+        self.assertEqual(book.cash_pct, 40.0)
+        
+        decision = check_book_constraints(
+            ticker="GOOGL",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=8.0,
+            theme="Cloud",  # Different theme
+            liquidity_adv=300000000,
+            correlation_data={"AAPL": 0.3, "XOM": 0.1},
+            cio_sized=False,
+        )
+        
+        # Should ALLOW without completeness flag
+        self.assertEqual(decision.decision, "ALLOW")
+        self.assertFalse(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_completeness_never_blocks(self):
+        """
+        Book completeness must never be a BLOCK, even with extreme thresholds.
+        
+        0 names, 100% cash → still ALLOW (FLAG at most).
+        """
+        book = Book(nav=1000000, cash=1000000, positions=[], asof="2026-08-16")
+        
+        # 0 names, 100% cash → should FLAG but never BLOCK
+        decision = check_book_constraints(
+            ticker="FIRST",
+            ticket_type="BUY",
+            book=book,
+            proposed_weight_pct=5.0,
+            theme="Tech",
+            liquidity_adv=100000000,
+            cio_sized=False,
+        )
+        
+        # Must NOT be a BLOCK
+        self.assertNotEqual(decision.decision, "BLOCK")
+        
+        # Should be FLAG with completeness warning
+        self.assertEqual(decision.decision, "FLAG")
+        self.assertTrue(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_completeness_flag_on_hold(self):
+        """Book completeness FLAG applies to HOLD tickets too."""
+        positions = [
+            Position("AAPL", weight_pct=10.0, theme="Tech", liquidity_adv=500000000),
+        ]
+        book = Book(nav=1000000, cash=900000, positions=positions, asof="2026-08-16")
+        
+        # 1 name < 5, 90% cash > 50% → should FLAG
+        decision = check_book_constraints(
+            ticker="AAPL",
+            ticket_type="HOLD",
+            book=book,
+            cio_sized=False,
+        )
+        
+        # Should FLAG for completeness
+        self.assertEqual(decision.decision, "FLAG")
+        self.assertTrue(any("completeness" in r.lower() for r in decision.reasons))
+    
+    def test_completeness_flag_on_trim(self):
+        """Book completeness FLAG applies to TRIM tickets too."""
+        positions = [
+            Position("AAPL", weight_pct=15.0, theme="Tech", liquidity_adv=500000000),
+            Position("MSFT", weight_pct=10.0, theme="Tech", liquidity_adv=400000000),
+        ]
+        book = Book(nav=1000000, cash=750000, positions=positions, asof="2026-08-16")
+        
+        # 2 names < 5, 75% cash > 50% → should FLAG
+        decision = check_book_constraints(
+            ticker="AAPL",
+            ticket_type="TRIM",
+            book=book,
+            proposed_weight_pct=10.0,  # Trim from 15% to 10%
+            cio_sized=False,
+        )
+        
+        # Should FLAG for completeness
+        self.assertEqual(decision.decision, "FLAG")
+        self.assertTrue(any("completeness" in r.lower() for r in decision.reasons))
     
     def test_liquidity_constraint_enforced(self):
         """Test that position size vs ADV is enforced."""

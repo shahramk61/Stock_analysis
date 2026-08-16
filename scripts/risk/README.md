@@ -43,11 +43,13 @@ Defined in `scripts/risk/limits.py`:
 | Max names | 20 | Total positions in book |
 | Liquidity | Position < ADV / 20 | For liquid exit; fail closed if ADV missing |
 | Theme purity | Required | All positions must have theme tag |
+| **Book completeness** | **< 5 names AND > 50% cash** | **FLAG (not BLOCK) for under-investment; dies when CIO sized or cash memo** |
 
 ### Special Rules
 
 - **Fractional shares**: Check dollar weight vs. 10% name cap, not whole-share count. Don't block a BUY if the ticket notional is ≤10% of NAV, even if 1 share costs more than 10% of NAV.
 - **Option sleeve**: Only count positions where Coverage/CIO has marked `option_sleeve=True` OR `hurdle_15pct="miss"`. If the mark is missing, do NOT guess—do not count toward sleeve.
+- **Book completeness FLAG** (desk-locked 2026-08-16, Risk postmortem round 2): FLAG when n_names < 5 AND cash_pct > 50% (under-invested). Never BLOCK on this. The FLAG dies (not emitted) when CIO has sized the book (`cio_sized=True`) or written a cash memo (`cash_memo=True`). Default: FLAG (fail closed).
 - **First add exception**: First BUY into a new name does **not** require correlation data
 - **Multi-name ADD**: Requires correlation data to validate factor cluster exposure
 - **Stranded book**: TRIM/SELL that would drop below 3 names or orphan a theme → FLAG (not BLOCK)
@@ -158,6 +160,52 @@ decision = check_book_constraints(
 
 assert decision.decision == "BLOCK"
 assert any("option sleeve" in r.lower() for r in decision.reasons)
+```
+
+### Book Completeness FLAG
+
+```python
+# Book completeness FLAG: warn when under-invested
+# FLAG when n_names < 5 AND cash_pct > 50% (idle capital)
+# Never BLOCK - this is a warning only
+# The FLAG dies when CIO has sized the book or written a cash memo
+
+positions = [
+    Position("AAPL", weight_pct=10.0, theme="Tech", liquidity_adv=500000000),
+    Position("XOM", weight_pct=10.0, theme="Energy", liquidity_adv=200000000),
+]
+book = Book(nav=1_000_000, cash=800_000, positions=positions, asof="2026-08-16")
+
+# 2 names < 5, 80% cash > 50% → should FLAG for under-investment
+decision = check_book_constraints(
+    ticker="GOOGL",
+    ticket_type="BUY",
+    book=book,
+    proposed_weight_pct=8.0,
+    theme="Cloud",
+    liquidity_adv=300_000_000,
+    correlation_data={"AAPL": 0.3, "XOM": 0.1},
+    cio_sized=False,  # No CIO sizing yet
+)
+
+# Should FLAG (not BLOCK) with completeness warning
+assert decision.decision == "FLAG"
+assert any("completeness" in r.lower() for r in decision.reasons)
+assert any("under-invested" in r.lower() for r in decision.reasons)
+
+# After CIO sizes the book → no completeness FLAG
+decision2 = check_book_constraints(
+    ticker="GOOGL",
+    ticket_type="BUY",
+    book=book,
+    proposed_weight_pct=8.0,
+    theme="Cloud",
+    liquidity_adv=300_000_000,
+    correlation_data={"AAPL": 0.3, "XOM": 0.1},
+    cio_sized=True,  # CIO has sized
+)
+
+assert decision2.decision == "ALLOW"  # No flag
 ```
 
 ### Stranded Book Check (TRIM/SELL)

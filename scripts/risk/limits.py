@@ -52,6 +52,13 @@ STRANDED_MIN_NAMES: Final[int] = 3
 # Flag if a SELL would create a liquidity hole (e.g., remaining positions too illiquid)
 STRANDED_LIQUIDITY_CHECK: Final[bool] = True
 
+# Book completeness thresholds (desk-locked 2026-08-16, Risk postmortem round 2)
+# FLAG when book is under-invested: too few names and too much idle cash
+COMPLETENESS_MIN_NAMES: Final[int] = 5  # Flag if below this threshold
+COMPLETENESS_MAX_CASH_PCT: Final[float] = 50.0  # Flag if above this threshold
+# The FLAG dies (not emitted) when CIO has sized the book or written a cash memo
+# Default: FLAG (fail closed - if we don't know, warn about under-investment)
+
 
 def get_limits_summary() -> dict:
     """Return a dictionary of all limit constants for logging/debugging."""
@@ -70,4 +77,6 @@ def get_limits_summary() -> dict:
         "stranded_cash_floor_pct": STRANDED_CASH_FLOOR_PCT,
         "stranded_min_names": STRANDED_MIN_NAMES,
         "stranded_liquidity_check": STRANDED_LIQUIDITY_CHECK,
+        "completeness_min_names": COMPLETENESS_MIN_NAMES,
+        "completeness_max_cash_pct": COMPLETENESS_MAX_CASH_PCT,
     }
