@@ -220,8 +220,8 @@ def test_loss_streak_cuts():
     assert any("memory" in r.category.lower() for r in dec.reasons)
 
 
-def test_missing_book_when_adding_vetoes():
-    """Adding a new name without book snapshot → VETO (cannot prove concentration OK)."""
+def test_book_not_ready_vetoes():
+    """book_ready=false → VETO adds (PM state: paper book not ready)."""
     dec = vet_trade(
         action="long",
         ticker="NEW",
@@ -229,16 +229,40 @@ def test_missing_book_when_adding_vetoes():
         proposed_risk_pct=0.01,
         var_95=15.0,
         regime="Neutral",
-        book=None,  # missing
+        book={"AAPL": {"notional": 10_000, "sector": "Technology"}},
+        book_ready=False,  # PM state
+        proposed_notional=5_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("book_ready" in r.detail.lower() for r in dec.reasons)
+
+
+def test_empty_book_vetoes_add():
+    """Empty book → VETO adds (cannot verify concentration)."""
+    dec = vet_trade(
+        action="long",
+        ticker="NEW",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book={},  # empty
+        book_ready=True,
         proposed_notional=10_000,
     )
     assert dec.outcome == VET_VETO
-    assert any("book" in r.detail.lower() for r in dec.reasons)
+    assert any("empty" in r.detail.lower() for r in dec.reasons)
 
 
 def test_single_name_cap_vetoes():
-    """Single name > 25% cap → VETO."""
-    book = {"EXISTING": 30_000}
+    """Single name > 10% cap → VETO (Risk-ratified limit)."""
+    book = {
+        "AAPL": {"notional": 45_000, "sector": "Technology"},
+        "MSFT": {"notional": 45_000, "sector": "Technology"},
+    }
+    sector_tags = {"NEW": "Healthcare"}
+    # Total: 90k + 10k = 100k; NEW: 10k/100k = 10% exactly at limit
+    # Add 11k to exceed
     dec = vet_trade(
         action="long",
         ticker="NEW",
@@ -247,21 +271,46 @@ def test_single_name_cap_vetoes():
         var_95=15.0,
         regime="Neutral",
         book=book,
-        proposed_notional=20_000,  # would be 20/50 = 40% > 25% cap
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations={},  # provided but empty (no correlations)
+        proposed_notional=11_000,  # 11/101 = 10.9% > 10%
     )
     assert dec.outcome == VET_VETO
-    assert any("single" in r.detail.lower() or "concentration" in r.category.lower() for r in dec.reasons)
+    assert any("single" in r.detail.lower() for r in dec.reasons)
+    assert "0.10" in dec.reasons[0].detail or "10%" in dec.reasons[0].detail
 
 
-def test_cluster_cap_vetoes():
-    """Correlated cluster > 40% cap → VETO."""
-    book = {"AAPL": 20_000, "MSFT": 20_000, "XYZ": 10_000}  # 50k total
-    corr = {
-        ("AAPL", "GOOGL"): 0.85,  # high correlation
-        ("GOOGL", "MSFT"): 0.60,
+def test_missing_sector_tag_vetoes():
+    """Missing sector tag on add → VETO (cannot prove sector cap)."""
+    book = {"AAPL": {"notional": 50_000, "sector": "Technology"}}
+    sector_tags = {}  # missing NEW
+    dec = vet_trade(
+        action="long",
+        ticker="NEW",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        proposed_notional=5_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("sector tag" in r.detail.lower() for r in dec.reasons)
+
+
+def test_sector_cap_vetoes():
+    """Sector > 25% cap → VETO (Risk-ratified limit)."""
+    book = {
+        "AAPL": {"notional": 15_000, "sector": "Technology"},
+        "MSFT": {"notional": 10_000, "sector": "Technology"},
+        "XYZ": {"notional": 75_000, "sector": "Healthcare"},
     }
-    # Add 10k GOOGL: single-name 10/60 = 16.7% < 25% (OK)
-    # But cluster AAPL + GOOGL = 30k / 60k = 50% > 40% (VETO)
+    sector_tags = {"GOOGL": "Technology"}
+    # Total: 100k + 5k = 105k
+    # Tech sector: 15k + 10k + 5k = 30k / 105k = 28.6% > 25%
     dec = vet_trade(
         action="long",
         ticker="GOOGL",
@@ -270,11 +319,100 @@ def test_cluster_cap_vetoes():
         var_95=15.0,
         regime="Neutral",
         book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations={},
+        proposed_notional=5_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("sector" in r.category.lower() and "Technology" in r.detail for r in dec.reasons)
+
+
+def test_missing_correlation_vetoes():
+    """Missing PIT correlation → VETO factor cluster check (fail closed)."""
+    book = {
+        "AAPL": {"notional": 50_000, "sector": "Technology"},
+        "XYZ": {"notional": 50_000, "sector": "Healthcare"},
+    }
+    sector_tags = {"NEW": "Finance"}  # different sector, passes sector cap
+    # Total: 100k + 5k = 105k; Finance: 5k / 105k = 4.8% < 25% OK
+    # Single-name: 5k / 105k = 4.8% < 10% OK
+    # But missing correlation → VETO
+    dec = vet_trade(
+        action="long",
+        ticker="NEW",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations=None,  # missing PIT correlation
+        proposed_notional=5_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("correlation" in r.detail.lower() or "PIT" in r.detail for r in dec.reasons)
+
+
+def test_factor_cluster_cap_vetoes():
+    """Factor cluster > 35% cap → VETO (Risk-ratified limit)."""
+    book = {
+        "AAPL": {"notional": 20_000, "sector": "Technology"},
+        "MSFT": {"notional": 10_000, "sector": "Finance"},
+        "JNJ": {"notional": 10_000, "sector": "Healthcare"},
+        "XOM": {"notional": 60_000, "sector": "Energy"},
+    }
+    sector_tags = {"GOOGL": "Technology"}
+    # Total: 100k + 10k = 110k
+    # Tech sector: 20k + 10k = 30k / 110k = 27.3% < 25% OK (just under)
+    # Actually, let me use Healthcare to be safer
+    sector_tags = {"GOOGL": "Healthcare"}
+    # Healthcare: 10k + 10k = 20k / 110k = 18.2% < 25% OK
+    # Single-name: 10k / 110k = 9.1% < 10% OK
+    # Factor cluster: if AAPL-GOOGL and MSFT-GOOGL and JNJ-GOOGL all > 0.60
+    # Cluster = 20k + 10k + 10k + 10k = 50k / 110k = 45.5% > 35% VETO
+    corr = {
+        ("AAPL", "GOOGL"): 0.65,
+        ("GOOGL", "MSFT"): 0.70,
+        ("GOOGL", "JNJ"): 0.62,
+    }
+    dec = vet_trade(
+        action="long",
+        ticker="GOOGL",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
         correlations=corr,
         proposed_notional=10_000,
     )
     assert dec.outcome == VET_VETO
-    assert any("cluster" in r.detail.lower() for r in dec.reasons)
+    assert any("factor cluster" in r.detail.lower() or "cluster" in r.category.lower() for r in dec.reasons)
+
+
+def test_max_names_vetoes():
+    """Book has 20 names → VETO adding 21st (Risk-ratified limit)."""
+    book = {f"TICK{i}": {"notional": 5_000, "sector": "Technology"} for i in range(20)}
+    sector_tags = {"NEW": "Technology"}
+    dec = vet_trade(
+        action="long",
+        ticker="NEW",
+        asof="2026-08-01",
+        proposed_risk_pct=0.01,
+        var_95=15.0,
+        regime="Neutral",
+        book=book,
+        book_ready=True,
+        sector_tags=sector_tags,
+        correlations={},
+        proposed_notional=1_000,
+    )
+    assert dec.outcome == VET_VETO
+    assert any("20" in r.detail and "names" in r.detail.lower() for r in dec.reasons)
 
 
 def test_research_buy_with_execute_flat_stays_flat():
@@ -407,7 +545,7 @@ def test_combined_cuts_multiply():
 
 def test_existing_position_no_concentration_veto():
     """Already have position → no concentration veto when sizing up."""
-    book = {"TEST": 10_000}  # already have TEST
+    book = {"TEST": {"notional": 10_000, "sector": "Technology"}}
     dec = vet_trade(
         action="long",
         ticker="TEST",
@@ -416,6 +554,7 @@ def test_existing_position_no_concentration_veto():
         var_95=15.0,
         regime="Neutral",
         book=book,
+        book_ready=True,
         proposed_notional=50_000,  # would exceed cap if new, but it's existing
     )
     # No concentration veto for existing position
@@ -589,9 +728,14 @@ if __name__ == "__main__":
     test_elevated_var_cuts()
     test_stop_cooldown_vetoes()
     test_loss_streak_cuts()
-    test_missing_book_when_adding_vetoes()
+    test_book_not_ready_vetoes()
+    test_empty_book_vetoes_add()
     test_single_name_cap_vetoes()
-    test_cluster_cap_vetoes()
+    test_missing_sector_tag_vetoes()
+    test_sector_cap_vetoes()
+    test_missing_correlation_vetoes()
+    test_factor_cluster_cap_vetoes()
+    test_max_names_vetoes()
     test_research_buy_with_execute_flat_stays_flat()
     test_position_size_zero_on_veto()
     test_position_size_nonzero_on_allow()

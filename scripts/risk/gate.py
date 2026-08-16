@@ -11,6 +11,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from .limits import CONCENTRATION_LIMITS, PENDING_ENFORCEMENT
+
 
 # Decision outcomes
 VET_ALLOW = "ALLOW"
@@ -318,76 +320,162 @@ def _check_concentration(
     action: str,
     ticker: str,
     proposed_notional: float,
-    book: Optional[Dict[str, float]],
+    book: Optional[Dict[str, Any]],
+    book_ready: bool,
+    sector_tags: Optional[Dict[str, str]],
     correlations: Optional[Dict[Tuple[str, str], float]],
-    single_name_cap: float = 0.25,
-    cluster_cap: float = 0.40,
-    high_corr_threshold: float = 0.70,
 ) -> Optional[VetoReason]:
     """
-    Concentration / correlation check when adding a name.
-    - If action != 'long' → pass (no new exposure)
-    - If proposed_notional <= 0 → pass (not sizing a position; concentration N/A)
-    - If book is provided and ticker in book → pass (existing position, not adding)
-    - If proposed_notional > 0 and book is None → VETO (cannot verify concentration)
-    - Single-name notional cap (default 25%)
-    - Correlated cluster cap (default 40% for names with corr > 0.70)
+    Risk-ratified concentration limits enforcement.
+    
+    Ratified limits:
+    - Single name ≤ 10% of book
+    - Sector ≤ 25%
+    - Factor cluster ≤ 35% (pending Quant PIT return matrix)
+    - Cash ≥ 10%
+    - Max 20 names
+    
+    PM state:
+    - book_ready=false or empty book → VETO new adds
+    
+    Missing data:
+    - Missing sector tag on add → VETO (cannot prove sector cap)
+    - Missing correlation → VETO factor cluster check (cannot prove cluster cap)
+    
+    Args:
+        action: proposed action
+        ticker: ticker being added
+        proposed_notional: notional for this add
+        book: current book {ticker: {"notional": float, "sector": str, ...}}
+        book_ready: PM state flag (false → no adds)
+        sector_tags: sector tags {ticker: sector} for add
+        correlations: PIT return matrix (unavailable until Quant ships)
     """
     if action != "long":
         return None
     
-    # If proposed_notional is 0, we're not sizing a position (concentration N/A)
+    # If proposed_notional is 0, we're not adding (concentration N/A)
     if proposed_notional <= 0:
         return None
     
-    # If book is provided and ticker exists → not adding a new name
-    if book is not None and ticker in book:
+    # If book provided and ticker exists → not adding a new name
+    if book is not None and isinstance(book, dict) and ticker in book:
         return None
     
-    # If we're sizing a position (proposed_notional > 0) and book is None,
-    # we can't verify concentration → VETO
-    if book is None:
+    # PM state: book_ready=false or empty book → VETO adds
+    if not book_ready:
         return VetoReason(
-            category="missing_book",
-            detail="Cannot verify concentration: book snapshot required when adding new name",
+            category="book_not_ready",
+            detail=f"book_ready=false: PM state blocks new adds (limit: paper book must be ready)",
             severity=VET_VETO,
         )
-
-    # Check single-name cap
-    total_notional = sum(abs(v) for v in book.values()) + proposed_notional
-    if total_notional > 0:
-        single_weight = proposed_notional / total_notional
-        if single_weight > single_name_cap:
-            return VetoReason(
-                category="concentration_single",
-                detail=f"Single-name weight {single_weight:.1%} > {single_name_cap:.0%} cap",
-                severity=VET_VETO,
-            )
-
-    # Check cluster cap (if correlations provided)
-    if correlations is not None:
-        # Find highly correlated existing names
-        cluster_notional = proposed_notional
-        cluster_tickers = [ticker]
-        for existing_ticker, notional in book.items():
-            corr_key = tuple(sorted([ticker, existing_ticker]))
-            corr = correlations.get(corr_key)
-            if corr is not None and corr > high_corr_threshold:
-                cluster_notional += abs(notional)
-                cluster_tickers.append(existing_ticker)
-
-        if total_notional > 0:
-            cluster_weight = cluster_notional / total_notional
-            if cluster_weight > cluster_cap:
-                return VetoReason(
-                    category="concentration_cluster",
-                    detail=(
-                        f"Cluster {cluster_tickers} weight {cluster_weight:.1%} > "
-                        f"{cluster_cap:.0%} cap (corr > {high_corr_threshold:.0%})"
-                    ),
-                    severity=VET_VETO,
-                )
-
+    
+    if book is None or not isinstance(book, dict) or len(book) == 0:
+        return VetoReason(
+            category="empty_book",
+            detail=f"Empty book: cannot verify concentration limits when adding {ticker}",
+            severity=VET_VETO,
+        )
+    
+    # Check max names (ratified: 20)
+    current_names = len(book)
+    max_names = CONCENTRATION_LIMITS["max_names"]
+    if current_names >= max_names:
+        return VetoReason(
+            category="max_names",
+            detail=f"Book has {current_names} names; max {max_names} (limit: max_names={max_names})",
+            severity=VET_VETO,
+        )
+    
+    # Calculate total notional (existing + proposed)
+    total_notional = sum(
+        abs(pos["notional"]) if isinstance(pos, dict) else abs(pos)
+        for pos in book.values()
+    ) + proposed_notional
+    
+    if total_notional <= 0:
+        return None
+    
+    # Check single-name cap (ratified: 10%)
+    single_name_cap = CONCENTRATION_LIMITS["single_name_pct"]
+    single_weight = proposed_notional / total_notional
+    if single_weight > single_name_cap:
+        return VetoReason(
+            category="single_name_cap",
+            detail=f"Single-name weight {single_weight:.1%} > {single_name_cap:.0%} (limit: single_name_pct={single_name_cap})",
+            severity=VET_VETO,
+        )
+    
+    # Check sector cap (ratified: 25%) - requires sector tags
+    sector_cap = CONCENTRATION_LIMITS["sector_pct"]
+    if sector_tags is None or not isinstance(sector_tags, dict):
+        return VetoReason(
+            category="missing_sector_tag",
+            detail=f"Missing sector tags: cannot verify sector ≤ {sector_cap:.0%} cap (limit: sector_pct={sector_cap})",
+            severity=VET_VETO,
+        )
+    
+    new_sector = sector_tags.get(ticker)
+    if not new_sector:
+        return VetoReason(
+            category="missing_sector_tag",
+            detail=f"Missing sector tag for {ticker}: cannot prove sector cap (limit: sector_pct={sector_cap})",
+            severity=VET_VETO,
+        )
+    
+    # Calculate sector notional (existing + proposed)
+    sector_notional = proposed_notional
+    for existing_ticker, pos in book.items():
+        existing_notional = abs(pos["notional"]) if isinstance(pos, dict) else abs(pos)
+        existing_sector = None
+        if isinstance(pos, dict):
+            existing_sector = pos.get("sector")
+        if not existing_sector and sector_tags:
+            existing_sector = sector_tags.get(existing_ticker)
+        
+        if existing_sector == new_sector:
+            sector_notional += existing_notional
+    
+    sector_weight = sector_notional / total_notional
+    if sector_weight > sector_cap:
+        return VetoReason(
+            category="sector_cap",
+            detail=f"Sector {new_sector} weight {sector_weight:.1%} > {sector_cap:.0%} (limit: sector_pct={sector_cap})",
+            severity=VET_VETO,
+        )
+    
+    # Factor cluster (ratified: 35%) - pending Quant PIT return matrix
+    # If correlations provided, we can check; if missing → fail closed
+    factor_cluster_cap = CONCENTRATION_LIMITS["factor_cluster_pct"]
+    if correlations is None:
+        # Correlation unavailable → cannot enforce factor cluster limit → fail closed
+        return VetoReason(
+            category="missing_correlation",
+            detail=f"Missing PIT correlation: cannot verify factor cluster ≤ {factor_cluster_cap:.0%} (limit: factor_cluster_pct={factor_cluster_cap}, {PENDING_ENFORCEMENT['correlation']})",
+            severity=VET_VETO,
+        )
+    
+    # If correlations provided, check factor cluster (>0.60 high correlation)
+    cluster_notional = proposed_notional
+    cluster_tickers = [ticker]
+    high_corr_threshold = 0.60  # factor cluster threshold
+    
+    for existing_ticker, pos in book.items():
+        existing_notional = abs(pos["notional"]) if isinstance(pos, dict) else abs(pos)
+        corr_key = tuple(sorted([ticker, existing_ticker]))
+        corr = correlations.get(corr_key)
+        if corr is not None and corr > high_corr_threshold:
+            cluster_notional += existing_notional
+            cluster_tickers.append(existing_ticker)
+    
+    cluster_weight = cluster_notional / total_notional
+    if cluster_weight > factor_cluster_cap:
+        return VetoReason(
+            category="factor_cluster_cap",
+            detail=f"Factor cluster {cluster_tickers} weight {cluster_weight:.1%} > {factor_cluster_cap:.0%} (limit: factor_cluster_pct={factor_cluster_cap}, corr>{high_corr_threshold:.0%})",
+            severity=VET_VETO,
+        )
+    
     return None
 
 
@@ -403,7 +491,9 @@ def vet_trade(
     structural_breakdown: bool = False,
     clear_uptrend: bool = False,
     memory_snapshot: Optional[Dict[str, Any]] = None,
-    book: Optional[Dict[str, float]] = None,
+    book: Optional[Dict[str, Any]] = None,
+    book_ready: bool = True,
+    sector_tags: Optional[Dict[str, str]] = None,
     correlations: Optional[Dict[Tuple[str, str], float]] = None,
     live_leak: bool = False,
     fundamentals_pit: bool = True,
@@ -437,8 +527,10 @@ def vet_trade(
         structural_breakdown: death cross / Bearish stack (affects high VaR veto)
         clear_uptrend: Bullish stack / golden cross (high VaR can trade small if True)
         memory_snapshot: output of DecisionMemory.apply_to_policy_inputs()
-        book: current book {ticker: notional}, for concentration checks when adding
-        correlations: pairwise correlations {(t1, t2): corr}, for cluster checks
+        book: current book {ticker: {"notional": float, "sector": str, ...}} for concentration
+        book_ready: PM state flag (false → VETO adds; paper book must be ready)
+        sector_tags: sector tags {ticker: sector} (required for sector cap check)
+        correlations: PIT return matrix {(t1, t2): corr} (required for factor cluster check)
         live_leak: True if live data leaked into replay (VETO)
         fundamentals_pit: False if non-PIT fundamentals used in replay (VETO)
         proposed_notional: proposed notional for this trade (for concentration)
@@ -544,12 +636,16 @@ def vet_trade(
             severity=VET_CUT,
         ))
 
-    # 7) Concentration / correlation
+    # 7) Concentration (Risk-ratified limits)
     conc_reason = _check_concentration(
-        action, ticker, proposed_notional, book, correlations
+        action, ticker, proposed_notional, book, book_ready, sector_tags, correlations
     )
     if conc_reason:
         reasons.append(conc_reason)
+        # Include ratified limit in missing or reasons
+        if "missing" in conc_reason.category.lower():
+            # Don't duplicate in missing list if it's book_ready or similar state
+            pass
         return RiskDecision(
             outcome=VET_VETO,
             risk_pct=0.0,

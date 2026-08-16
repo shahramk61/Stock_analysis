@@ -108,26 +108,51 @@ Memory rules:
 - **Stop cooldown** (5 days after stop-out): VETO new longs
 - **Loss streak** ≥2: CUT (×0.5 risk)
 
-## Concentration / Correlation
+## Concentration Limits (Risk-Ratified)
 
-Optional checks when `book` (current positions) and/or `correlations` are provided:
+**Authority**: Risk CoS. Do not invent other limits.
+
+Ratified limits (enforced fail-closed):
+- **Single name** ≤ 10% of book
+- **Sector** ≤ 25%
+- **Factor cluster** ≤ 35% (corr > 0.60; pending Quant PIT return matrix)
+- **Cash** ≥ 10% (not yet enforced)
+- **Max names** ≤ 20
+
+PM state requirements:
+- `book_ready=false` → VETO new adds (paper book must be ready)
+- Empty book → VETO new adds (cannot verify limits)
+
+### Enforcement
 
 ```python
-book = {"AAPL": 50_000, "MSFT": 30_000}  # {ticker: notional}
-correlations = {("AAPL", "GOOGL"): 0.85, ...}  # {(t1, t2): corr}
+book = {
+    "AAPL": {"notional": 50_000, "sector": "Technology"},
+    "MSFT": {"notional": 30_000, "sector": "Technology"},
+}
+sector_tags = {"GOOGL": "Technology"}  # required for sector check
+correlations = {("AAPL", "GOOGL"): 0.65, ...}  # required for factor cluster
 
 decision = vet_trade(
     ...,
     book=book,
-    correlations=correlations,
+    book_ready=True,  # PM state flag
+    sector_tags=sector_tags,  # required
+    correlations=correlations,  # required (Quant PIT return matrix)
     proposed_notional=20_000,
 )
 ```
 
-- If `proposed_notional > 0` and `book is None` → VETO (can't verify concentration)
-- If ticker already in book → skip concentration check (existing position)
-- Single-name cap: 25% of total book
-- Cluster cap: 40% for names with pairwise correlation > 0.70
+**Missing data → VETO (fail closed)**:
+- `book_ready=false` → VETO
+- Empty book → VETO
+- Missing sector tag on add → VETO (cannot prove sector cap)
+- Missing correlation → VETO factor cluster check (Quant PIT return matrix not yet available)
+
+**Never invented**:
+- Do NOT treat missing correlation as 0
+- Do NOT invent sector tags
+- Limits are in `scripts/risk/limits.py` (CONCENTRATION_LIMITS constant)
 
 ## CVaR (Conditional Value at Risk)
 
