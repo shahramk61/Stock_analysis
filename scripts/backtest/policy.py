@@ -55,6 +55,8 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
     """
     Pure helper: normalize constructive/destructive channels from scores.signals
     (and optional quant). Used by default_policy and unit tests.
+    
+    Fail-closed: missing/non-finite VaR or regime → flags set to fail safe.
     """
     signals = signals or {}
     multi = signals.get("multi_horizon_forecasts") or signals.get("multi_h") or {}
@@ -74,7 +76,8 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
     adx = signals.get("adx") or {}
     classic = signals.get("classic") or {}
     finbert = signals.get("finbert") or signals.get("finbert_sentiment") or {}
-    regime = (signals.get("regime") or {}).get("regime", "Neutral")
+    regime_dict = signals.get("regime") or {}
+    regime = regime_dict.get("regime") if isinstance(regime_dict, dict) else None
     mcr = signals.get("mc_risk") or {}
 
     stack = str(trend.get("stack") or "Unknown")
@@ -110,7 +113,18 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
         fb_label not in ("Neutral", "Disabled", "N/A", "") and "disable" not in fb_label.lower()
     )
 
-    var95 = float(mcr.get("var_95") or 0)
+    # Fail-closed: missing/non-finite VaR → None (not 0)
+    var95_raw = mcr.get("var_95")
+    var95 = None
+    if var95_raw is not None:
+        try:
+            var95_val = float(var95_raw)
+            if not (var95_val != var95_val or var95_val == float('inf') or var95_val == float('-inf')):
+                # finite
+                var95 = var95_val
+        except (TypeError, ValueError):
+            pass
+    
     # Structural breakdown: not just "MACD soft" — death cross / Bearish stack
     structural_breakdown = (
         stack == "Bearish"
@@ -118,6 +132,10 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
         or (stack != "Bullish" and not golden and adx_val >= 25 and minus_di > plus_di + 5)
     )
 
+    # Fail-closed: missing regime → treat as missing (None), not "Neutral"
+    regime_str = str(regime).strip() if regime else None
+    regime_missing = not regime_str or regime_str in ("", "None", "Unknown")
+    
     return {
         "consensus": consensus,
         "consensus_bull": _dir_bull(consensus),
@@ -135,13 +153,15 @@ def extract_leverage_flags(signals: Dict[str, Any], quant_output: Optional[Dict[
         "news_bear": news_bear and news_active,
         "news_active": news_active,
         "finbert_score": fb_score,
-        "regime": regime,
-        "regime_bear": str(regime) == "Bear",
-        "regime_bull": str(regime) == "Bull",
+        "regime": regime_str,
+        "regime_bear": regime_str == "Bear" if regime_str else False,
+        "regime_bull": regime_str == "Bull" if regime_str else False,
+        "regime_missing": regime_missing,
         "var95": var95,
-        "high_var": var95 > VAR_HIGH,
-        "elevated_var": var95 > VAR_ELEVATED,
-        "extreme_var": var95 > VAR_EXTREME,
+        "var95_missing": var95 is None,
+        "high_var": var95 > VAR_HIGH if var95 is not None else False,
+        "elevated_var": var95 > VAR_ELEVATED if var95 is not None else False,
+        "extreme_var": var95 > VAR_EXTREME if var95 is not None else False,
     }
 
 
@@ -157,7 +177,8 @@ def apply_risk_filters(
     """
     Layer risk on a proposed entry.
 
-    Hard flat (no new long):
+    Fail-closed hard flat (no new long):
+      - Missing VaR or regime (cannot assess risk)
       - Bear regime
       - Extreme VaR (>45)
       - High VaR (>30) *and* structural breakdown (death/Bearish stack/…)
@@ -171,6 +192,20 @@ def apply_risk_filters(
     """
     if action != "long":
         return action, risk, rationale
+
+    # 0) Fail-closed: missing required risk data → flat
+    if lev.get("var95_missing"):
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: VaR missing (fail closed) → flat",
+        )
+    if lev.get("regime_missing"):
+        return (
+            "flat",
+            0.0,
+            f"{rationale} | risk filter: regime missing (fail closed) → flat",
+        )
 
     var95 = lev["var95"]
     regime = lev["regime"]

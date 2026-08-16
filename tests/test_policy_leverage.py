@@ -169,6 +169,72 @@ def test_memory_still_blocks_after_leverage():
     assert "memory block" in sig.rationale
 
 
+def test_missing_var_flats_fail_closed():
+    """Fail-closed: missing VaR → flat (not long sized as if VaR=0)."""
+    s = {
+        "ticker": "TEST",
+        "overall": 65.0,
+        "signals": {
+            "multi_h": {"consensus_direction": "Neutral"},
+            "mc_risk": {},  # missing var_95
+            "regime": {"regime": "Neutral"},
+            "trend": {"stack": "Bullish", "golden_cross": True},
+            "adx": {"adx": 20, "plus_di": 25, "minus_di": 15},
+            "classic": {"macd_cross": "Bullish"},
+        },
+    }
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat", f"Expected flat but got {sig.action}: {sig.rationale}"
+    assert "VaR missing" in sig.rationale or "fail closed" in sig.rationale
+
+
+def test_none_var_flats_fail_closed():
+    """Fail-closed: None VaR → flat."""
+    s = _scores(65.0, stack="Bullish", golden=True, var95=None)
+    # Manually set var_95 to None in signals
+    s["signals"]["mc_risk"]["var_95"] = None
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat"
+    assert "VaR missing" in sig.rationale or "fail closed" in sig.rationale
+
+
+def test_nan_var_flats_fail_closed():
+    """Fail-closed: NaN VaR → flat."""
+    s = _scores(65.0, stack="Bullish", golden=True)
+    s["signals"]["mc_risk"]["var_95"] = float('nan')
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat"
+    assert "VaR missing" in sig.rationale or "fail closed" in sig.rationale
+
+
+def test_missing_regime_flats_fail_closed():
+    """Fail-closed: missing regime → flat."""
+    s = {
+        "ticker": "TEST",
+        "overall": 65.0,
+        "signals": {
+            "multi_h": {"consensus_direction": "Neutral"},
+            "mc_risk": {"var_95": 15.0},
+            "regime": {},  # missing regime
+            "trend": {"stack": "Bullish", "golden_cross": True},
+            "adx": {"adx": 20, "plus_di": 25, "minus_di": 15},
+            "classic": {"macd_cross": "Bullish"},
+        },
+    }
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "flat"
+    assert "regime missing" in sig.rationale or "fail closed" in sig.rationale
+
+
+def test_supplied_var_lly_class_still_works():
+    """Regression: supplied VaR ~31 + Bullish stack = trade small (LLY-class)."""
+    s = _scores(60.2, stack="Bullish", golden=True, var95=31.2, regime="Bull", macd="Neutral")
+    sig = default_policy(s, quant_output={"quantitative_conviction": "High"}, current_price=100.0)
+    assert sig.action == "long", f"Expected long but got {sig.action}: {sig.rationale}"
+    assert sig.suggested_risk_pct > 0
+    assert "size cut" in sig.rationale
+
+
 if __name__ == "__main__":
     test_trend_path_allows_long_mid_score()
     test_high_var_constructive_structure_size_cuts_not_flat()
@@ -184,4 +250,9 @@ if __name__ == "__main__":
     test_extract_leverage_flags_news_active()
     test_choose_entry_pure()
     test_memory_still_blocks_after_leverage()
+    test_missing_var_flats_fail_closed()
+    test_none_var_flats_fail_closed()
+    test_nan_var_flats_fail_closed()
+    test_missing_regime_flats_fail_closed()
+    test_supplied_var_lly_class_still_works()
     print("All policy leverage tests passed.")
