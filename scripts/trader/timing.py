@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .session_clock import get_session_state, MarketSession, SessionState
+from .session_clock import get_session_state, MarketSession, SessionState, US_EASTERN
 from .horizon import choose_horizon, Horizon, HorizonChoice
 from .levels import compute_levels, TradeLevels
 from .gate import gate_execution, ExecuteGate
@@ -85,14 +85,15 @@ def build_timing_card(
     decision_memory: Optional[Dict[str, Any]] = None,
     risk_veto: Optional[Dict[str, Any]] = None,
     book: Optional[Dict[str, Any]] = None,
-    current_price: Optional[float] = None,
+    last_print: Optional[float] = None,
+    current_price: Optional[float] = None,  # DEPRECATED: use last_print
     overall_score: float = 50.0,
     atr_pct: float = 0.0,
     adx: float = 0.0,
     signals: Optional[Dict[str, Any]] = None,
     execution_mode: Optional[str] = None,
     mc_risk: Optional[Dict[str, Any]] = None,
-    timestamp: Optional[datetime] = None,
+    timestamp: Optional[datetime] = None,  # asof for replay
 ) -> TimingCard:
     """
     Build timing card from facts.
@@ -119,7 +120,10 @@ def build_timing_card(
     if timestamp is None:
         timestamp = datetime.now()
     
-    # 1. Session clock
+    # Prefer last_print, fallback to current_price for backward compat
+    price = last_print if last_print is not None else current_price
+    
+    # 1. Session clock (use asof/timestamp for replay, not wall-clock)
     session = get_session_state(timestamp)
     
     # 2. Horizon
@@ -143,7 +147,8 @@ def build_timing_card(
         policy_target = policy_hint.get("target_price")
     
     levels = compute_levels(
-        current_price=current_price,
+        last_print=price,
+        current_price=price,  # Backward compat
         policy_stop=policy_stop,
         policy_target=policy_target,
         atr_pct=atr_pct,
@@ -310,9 +315,18 @@ def main():
         help="Path to handoff JSON from prepare_decision_handoff.py",
     )
     parser.add_argument(
+        "--asof",
+        help="As-of date for replay (YYYY-MM-DD or ISO datetime). For July 2026 replay, use asof date's session (not wall-clock).",
+    )
+    parser.add_argument(
         "--current-price",
         type=float,
-        help="Current price (required if not using --handoff)",
+        help="[DEPRECATED] Current price - use --last-print instead",
+    )
+    parser.add_argument(
+        "--last-print",
+        type=float,
+        help="Last daily Close ≤ asof (NOT live quote)",
     )
     parser.add_argument(
         "--score",
@@ -334,8 +348,10 @@ def main():
     )
     parser.add_argument(
         "--execution-mode",
-        choices=["session", "swing"],
-        help="Force session or swing mode",
+        "--horizon",
+        dest="execution_mode",
+        choices=["session", "swing", "daily"],
+        help="Force session or swing/daily mode (daily = swing for replay)",
     )
     parser.add_argument(
         "--policy-action",
@@ -378,6 +394,23 @@ def main():
     
     args = parser.parse_args()
     
+    # Parse asof for replay (defaults to now)
+    asof = None
+    if args.asof:
+        # Try date only (YYYY-MM-DD) first
+        try:
+            from datetime import time as dt_time
+            asof_date = datetime.strptime(args.asof, "%Y-%m-%d").date()
+            # Use market open time (9:30 AM ET) for date-only asof
+            asof = datetime.combine(asof_date, dt_time(9, 30), tzinfo=US_EASTERN)
+        except ValueError:
+            # Try ISO datetime
+            try:
+                asof = datetime.fromisoformat(args.asof)
+            except ValueError:
+                print(f"Error: Invalid --asof format: {args.asof}. Use YYYY-MM-DD or ISO datetime.", file=sys.stderr)
+                return 1
+    
     # Load PM trader_snapshot (default path or explicit)
     book_snapshot_path = args.book_snapshot
     if book_snapshot_path is None and DEFAULT_TRADER_SNAPSHOT_PATH.exists():
@@ -389,6 +422,9 @@ def main():
         book = load_trader_snapshot(book_snapshot_path)
         if book is None and book_snapshot_path is not None:
             print(f"Warning: Failed to load trader_snapshot from {book_snapshot_path}", file=sys.stderr)
+    
+    # Prefer last_print, fallback to current_price for backward compat
+    price = args.last_print if args.last_print is not None else args.current_price
     
     # Load facts from handoff or CLI args
     if args.handoff:
@@ -405,14 +441,17 @@ def main():
             facts["book"] = book
         
         # CLI args can override handoff
-        if args.current_price is not None:
-            facts["current_price"] = args.current_price
+        if price is not None:
+            facts["last_print"] = price
+            facts["current_price"] = price  # Backward compat
         if args.execution_mode:
             facts["execution_mode"] = args.execution_mode
+        if asof is not None:
+            facts["timestamp"] = asof
     else:
         # Build from CLI args
-        if args.current_price is None:
-            print("Error: --current-price required when not using --handoff", file=sys.stderr)
+        if price is None:
+            print("Error: --last-print (or --current-price) required when not using --handoff", file=sys.stderr)
             return 1
         
         # Build risk_veto from CLI args if provided
@@ -442,13 +481,15 @@ def main():
             "decision_memory": None,
             "risk_veto": risk_veto,
             "book": book,
-            "current_price": args.current_price,
+            "last_print": price,
+            "current_price": price,  # Backward compat
             "overall_score": args.score,
             "atr_pct": args.atr_pct,
             "adx": args.adx,
             "signals": None,
             "mc_risk": None,
             "execution_mode": args.execution_mode,
+            "timestamp": asof,  # For replay
         }
     
     # Build timing card

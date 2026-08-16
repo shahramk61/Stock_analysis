@@ -14,10 +14,13 @@ Gate hierarchy (all fail closed):
    - capacity.new_risk is FLAT → flat
    - nav_usd null → flat on NEW risk
    - Don't invent nav_usd, positions, or headroom
-2. Policy flat → stay flat
-3. Memory block → flat
+2. Memory (fail closed) - from Quant journal snapshot
+   - Missing memory → fail closed for NEW risk
+   - Blank string "" is NOT valid → treat as missing
+   - Don't invent journal rows to clear cooldown
+3. Policy flat → stay flat
 4. Session closed → flat
-5. Tape invalid → flat
+5. Tape invalid (missing last_print) → flat
 
 Research BUY must never become a long when Execute is FLAT.
 """
@@ -86,19 +89,19 @@ def gate_execution(
     Gate hierarchy (all fail closed):
     0. Risk veto: missing/VETO/CUT(null risk_pct) → flat
     1. PM book (trader_snapshot.json): book_ready false OR nav_known false OR capacity.new_risk FLAT OR nav_usd null → flat
-    2. Policy flat → flat
-    3. Memory block → flat
+    2. Memory (Quant journal): missing OR blank string "" → flat for NEW risk
+    3. Policy flat → flat
     4. Session closed → flat
-    5. Tape invalid → flat
+    5. Tape invalid (missing last_print) → flat
     
     Args:
         policy_hint: Policy hint dict with action, conviction, rationale
         dual_recommendation: Dual research/execute labels
-        decision_memory: Memory dict (from memory.apply_to_policy_inputs)
+        decision_memory: Memory dict (from Quant journal OR explicit empty object, never blank string "")
         risk_veto: Risk veto object (decision, reason, missing, risk_pct)
         book: PM trader_snapshot.json (book_ready, nav_known, nav_usd, capacity.new_risk, etc.)
         session: Market session status
-        levels: Trade levels with tape validity
+        levels: Trade levels with last_print (daily Close ≤ asof)
     
     Returns:
         ExecuteGate with final action and reasons
