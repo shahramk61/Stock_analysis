@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1.0",
+  "asof": "2026-08-16T10:00:00Z",
+  "book_ready": true,
+  "nav_known": true,
+  "nav_usd": 100000.0,
+  "nav_source": "simulated",
+  "open_risk": {
+    "names": [],
+    "name_count": 0,
+    "weights": null
+  },
+  "capacity": {
+    "new_risk": "ALLOW",
+    "reason": "NAV seeded, room for new positions"
+  },
+  "live_broker": false,
+  "notes": "Test fixture with NAV ready"
+}

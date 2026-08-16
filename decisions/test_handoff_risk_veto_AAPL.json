@@ -1,0 +1,40 @@
+{
+  "ticker": "AAPL",
+  "current_price": 150.0,
+  "signals": {
+    "overall_score": 62.0,
+    "signals": {
+      "atr_vol": {
+        "atr_percent": 2.5
+      },
+      "adx": {
+        "adx": 22.0
+      },
+      "mc_risk": {
+        "var_95": 18.5,
+        "stop_price": 145.0
+      }
+    }
+  },
+  "policy_hint": {
+    "action": "long",
+    "conviction": "Medium",
+    "suggested_risk_pct": 0.01,
+    "stop_price": 145.0,
+    "rationale": "Score 62.0 + Medium conviction"
+  },
+  "dual_recommendation": {
+    "research_recommendation": "BUY",
+    "execution_label": "LONG",
+    "execution_action": "long"
+  },
+  "risk_veto": {
+    "decision": "CUT",
+    "reason": "Risk approves with size cut to 0.3%",
+    "missing": [],
+    "risk_pct": 0.003
+  },
+  "decision_memory": "",
+  "prepared_at": "2026-08-16T12:00:00Z",
+  "backend_note": "Test handoff with risk_veto CUT"
+}
