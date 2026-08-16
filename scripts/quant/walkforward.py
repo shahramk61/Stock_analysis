@@ -134,8 +134,15 @@ def run_walkforward(
                 "asof": asof_str,
                 "score": score_result.get("overall_score"),
                 "pillar_scores": score_result.get("pillar_scores"),
+                "last_print": score_result.get("last_print"),
+                "last_print_date": score_result.get("last_print_date"),
+                "last_print_source": score_result.get("last_print_source"),
                 "availability": score_result.get("availability"),
+                "signals": score_result.get("signals"),  # Contains mc_risk with cvar_95
                 "realized_returns": realized if realized else None,
+                # Note: decision_memory/memory_text requires journal integration
+                # For now, each step is stateless (no cross-step memory)
+                # To add memory: load journal as of each asof, compute snapshot
             }
             steps.append(step)
 
